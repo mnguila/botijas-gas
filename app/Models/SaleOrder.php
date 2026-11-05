@@ -8,7 +8,7 @@ class SaleOrder extends Model
 {
     protected $fillable = [
         'channel', 'customer_id', 'location_id', 'vehicle_location_id', 'truck_plate', 'driver_name',
-        'created_by_user_id', 'note', 'sold_at', 'cancelled_at', 'cancelled_by_user_id',
+        'created_by_user_id', 'note', 'sold_at', 'cancelled_at', 'cancelled_by_user_id', 'cancellation_reason',
     ];
 
     protected $casts = ['sold_at' => 'datetime', 'cancelled_at' => 'datetime'];

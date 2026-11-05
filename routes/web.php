@@ -36,6 +36,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/products/{product}/edit', [CatalogController::class, 'editProduct'])->name('products.edit');
         Route::patch('/products/{product}', [CatalogController::class, 'updateProduct'])->name('products.update');
         Route::post('/products/{product}/stock', [CatalogController::class, 'addProductStock'])->name('products.stock.add');
+        Route::post('/products/{product}/damage', [CatalogController::class, 'reportCentralDamage'])->name('products.damage.store');
         Route::delete('/products/{product}', [CatalogController::class, 'destroyProduct'])->name('products.destroy');
         Route::patch('/products/{product}/restore', [CatalogController::class, 'restoreProduct'])->name('products.restore');
     });
@@ -67,6 +68,8 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/sales', [SalesController::class, 'index'])->name('sales.index');
         Route::post('/sales/wholesale', [SalesController::class, 'wholesale'])->name('sales.wholesale');
         Route::post('/sales/unit', [SalesController::class, 'unit'])->name('sales.unit');
+        Route::post('/sales/damages', [SalesController::class, 'reportStandDamage'])->name('sales.damages.store');
+        Route::post('/sales/{sale}/return', [SalesController::class, 'returnDamaged'])->name('sales.return');
         Route::post('/sales/{sale}/cancel', [SalesController::class, 'cancel'])->name('sales.cancel');
         Route::get('/sales/{sale}/delivery-guide', [SalesController::class, 'deliveryGuide'])->name('sales.delivery-guide');
     });

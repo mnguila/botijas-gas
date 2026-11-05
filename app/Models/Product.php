@@ -6,9 +6,9 @@ class Product extends Model
 {
     use SoftDeletes;
 
-    protected $fillable = ['brand', 'weight_kg', 'description', 'quantity', 'purchase_price', 'reseller_price', 'unit_price'];
+    protected $fillable = ['brand', 'weight_kg', 'description', 'quantity', 'damaged_quantity', 'purchase_price', 'reseller_price', 'unit_price'];
 
-    protected $casts = ['quantity' => 'integer'];
+    protected $casts = ['quantity' => 'integer', 'damaged_quantity' => 'integer'];
     public function getLabelAttribute(): string { return "Botija {$this->weight_kg}Kg · {$this->brand}"; }
 
     public function isReadyForSale(): bool

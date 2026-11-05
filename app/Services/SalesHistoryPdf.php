@@ -6,7 +6,7 @@ use Illuminate\Support\Collection;
 
 class SalesHistoryPdf
 {
-    public function render(Collection $orders, string $periodLabel, array $summary, array $expenseSummary, bool $canViewSalesProfit = false, ?array $pointDaily = null): string
+    public function render(Collection $orders, string $periodLabel, array $summary, array $expenseSummary, bool $canViewSalesProfit = false, ?array $pointDaily = null, ?Collection $refunds = null): string
     {
         $pages = [];
         $commands = $this->pageHeader($periodLabel, $summary, $expenseSummary, $canViewSalesProfit);
@@ -58,6 +58,7 @@ class SalesHistoryPdf
         }
         $pages[] = $commands;
         if ($pointDaily !== null) $pages = array_merge($pages, $this->pointPages($pointDaily, $canViewSalesProfit));
+        if ($refunds?->isNotEmpty()) $pages = array_merge($pages, $this->refundPages($refunds));
 
         foreach ($pages as $index => &$page) {
             $this->text($page, 'Histórico geral de vendas · Gerado em '.now()->format('d/m/Y H:i'), 40, 25, 8, false, 85);
@@ -78,7 +79,7 @@ class SalesHistoryPdf
         ];
         $this->text($commands, 'HISTÓRICO GERAL DE VENDAS', 40, 558, 20, true, 70, [1, 1, 1]);
         $this->text($commands, $periodLabel, 40, 531, 12, false, 90, [0.8, 0.91, 0.94]);
-        $this->text($commands, 'Vendas efetivas · A grosso e por unidade', 40, 513, 9, false, 100, [0.8, 0.91, 0.94]);
+        $this->text($commands, 'Totais líquidos · Vendas originais e reembolsos em secções separadas', 40, 513, 9, false, 100, [0.8, 0.91, 0.94]);
 
         foreach ([
             ['A GROSSO', 'wholesale', 52],
@@ -100,12 +101,46 @@ class SalesHistoryPdf
             $this->text($commands, 'Lucro: '.$this->money($totalProfitCents), 564, 413, 9, true);
         }
         $this->text($commands, 'Despesas operacionais aprovadas: '.$this->money($expenseSummary['amount_cents']), 564, 398, 8, true, 48);
+        $refundCents = $summary['wholesale']['refund_cents'] + $summary['unit']['refund_cents'];
+        if ($refundCents > 0) $this->text($commands, 'Reembolsos no período: '.$this->money($refundCents), 52, 398, 8, true, 45);
 
         foreach ([['N.º', 48], ['TIPO', 145], ['CLIENTE', 215], ['DESTINO / POSTO', 400], ['PREÇO UN.', 558], ['QTD.', 646], ['TOTAL', 705]] as [$label, $x]) {
             $this->text($commands, $label, $x, 368, 8, true);
         }
 
         return $commands;
+    }
+
+    private function refundPages(Collection $refunds): array
+    {
+        $pages = [];
+        $header = function (): array {
+            $commands = ['0.06 0.17 0.27 rg 0 505 842 90 re f', '0.04 0.56 0.65 rg 40 500 762 3 re f', '0.91 0.94 0.94 rg 40 478 762 22 re f'];
+            $this->text($commands, 'REEMBOLSOS', 40, 558, 20, true, 70, [1, 1, 1]);
+            $this->text($commands, 'Valores devolvidos ao cliente na data deste relatório', 40, 529, 10, false, 110, [0.8, 0.91, 0.94]);
+            foreach ([['DATA', 48], ['VENDA', 160], ['PRODUTO', 240], ['POSTO', 485], ['QTD.', 655], ['VALOR', 710]] as [$label, $x]) $this->text($commands, $label, $x, 485, 8, true);
+            return $commands;
+        };
+        $commands = $header();
+        $y = 460;
+        foreach ($refunds as $refund) {
+            if ($y < 85) {
+                $pages[] = $commands;
+                $commands = $header();
+                $y = 460;
+            }
+            $this->text($commands, $refund->created_at->format('d/m/Y H:i'), 48, $y, 8, false, 18);
+            $this->text($commands, '#'.str_pad((string) $refund->product_sale_id, 6, '0', STR_PAD_LEFT), 160, $y, 8);
+            $this->text($commands, $refund->saleItem?->product?->label ?? 'Produto removido', 240, $y, 8, false, 38);
+            $this->text($commands, $refund->location?->name ?? 'Armazém central', 485, $y, 8, false, 25);
+            $this->text($commands, (string) $refund->quantity, 655, $y, 8);
+            $this->text($commands, $this->money($refund->refund_cents), 710, $y, 8, true);
+            $this->text($commands, 'Motivo: '.$refund->reason, 48, $y - 12, 7, false, 105);
+            $y -= 34;
+        }
+        $pages[] = $commands;
+
+        return $pages;
     }
 
     private function pointPages(array $daily, bool $canViewSalesProfit): array

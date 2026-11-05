@@ -10,6 +10,7 @@ use App\Models\ProductAllocation;
 use App\Models\ProductSale;
 use App\Models\ProductStandStock;
 use App\Models\SaleOrder;
+use App\Models\StockDamageEvent;
 use App\Models\Permission;
 use App\Models\AccessGroup;
 use App\Models\User;
@@ -448,7 +449,7 @@ class SalesFlowTest extends TestCase
                 && $daily['totals']['orders'] === 0);
 
         $filtered = $this->get('/sales/history?period=day&date=2026-10-22&location_id='.$north->id)->assertOk()
-            ->assertSee('Estoque atual')->assertSee('Produtos por posto')->assertSee('Estoque baixo');
+            ->assertSee('Estoque disponível')->assertSee('Produtos por posto')->assertSee('Estoque baixo');
         $filtered->assertViewHas('summary', fn ($summary) => $summary['unit']['orders'] === 1
                 && $summary['unit']['revenue_cents'] === 41000 && $summary['wholesale']['orders'] === 0)
             ->assertViewHas('pointDaily', fn ($daily) => count($daily['rows']) === 1
@@ -537,21 +538,28 @@ class SalesFlowTest extends TestCase
         $unit = ProductSale::where('channel', 'unit')->firstOrFail();
         $this->assertSame(12, $product->fresh()->quantity);
 
-        $this->post("/sales/{$unit->id}/cancel")->assertSessionHas('success');
+        $this->get('/sales')->assertOk()->assertSee('data-cancel-sale-dialog', false)
+            ->assertSee('Motivo do cancelamento')->assertDontSee("onsubmit=\"return confirm('Cancelar esta venda", false);
+        $this->post("/sales/{$unit->id}/cancel")->assertSessionHasErrors('cancellation_reason');
+        $this->post("/sales/{$unit->id}/cancel", ['cancellation_reason' => '   '])->assertSessionHasErrors('cancellation_reason');
+        $this->assertSame(12, $product->fresh()->quantity);
+        $this->assertNull($unit->fresh()->cancelled_at);
+        $this->post("/sales/{$unit->id}/cancel", ['cancellation_reason' => ' Cliente desistiu '])->assertSessionHas('success');
         $this->assertSame(15, $product->fresh()->quantity);
         $this->assertSame(8, ProductStandStock::firstOrFail()->quantity);
         $this->assertNotNull($unit->fresh()->cancelled_at);
         $this->assertSame($owner->id, $unit->fresh()->cancelled_by_user_id);
+        $this->assertSame('Cliente desistiu', $unit->order->fresh()->cancellation_reason);
         $this->assertSame(0, app(SalesMetrics::class)->build()['unit']['revenue_cents']);
-        $this->post("/sales/{$unit->id}/cancel")->assertStatus(409);
+        $this->post("/sales/{$unit->id}/cancel", ['cancellation_reason' => 'Duplicado'])->assertStatus(409);
         $this->assertSame(15, $product->fresh()->quantity);
 
         $product->delete();
-        $this->post("/sales/{$wholesale->id}/cancel")->assertSessionHas('success');
+        $this->post("/sales/{$wholesale->id}/cancel", ['cancellation_reason' => 'Erro no carregamento'])->assertSessionHas('success');
         $this->assertSame(20, $product->fresh()->quantity);
         $this->assertSame(8, ProductStandStock::firstOrFail()->quantity);
         $this->assertSame(0, app(SalesMetrics::class)->build()['wholesale']['revenue_cents']);
-        $this->get('/sales')->assertOk()->assertSee('João Silva')
+        $this->get('/sales')->assertOk()->assertSee('João Silva')->assertSee('Cliente desistiu')
             ->assertDontSee('<th class="num">Margem</th>', false)
             ->assertDontSee('<th>Estado</th>', false)
             ->assertDontSee('Cancelada');
@@ -588,7 +596,7 @@ class SalesFlowTest extends TestCase
         $this->assertSame(8, $product->fresh()->quantity);
 
         $this->actingAs($owner);
-        $this->post("/sales/{$sale->id}/cancel")->assertSessionHas('success');
+        $this->post("/sales/{$sale->id}/cancel", ['cancellation_reason' => 'Venda anulada'])->assertSessionHas('success');
         $this->assertSame(10, $product->fresh()->quantity);
     }
 
@@ -619,7 +627,7 @@ class SalesFlowTest extends TestCase
         $this->assertStringContainsString('1.380,00 MT', $guide->getContent());
         $this->get('/sales')->assertOk()->assertSee('Petro Gas')->assertSee('Galp')->assertSee('1.380,00 MT');
 
-        $this->post('/sales/'.$order->items()->orderByDesc('id')->firstOrFail()->id.'/cancel')->assertSessionHas('success');
+        $this->post('/sales/'.$order->items()->orderByDesc('id')->firstOrFail()->id.'/cancel', ['cancellation_reason' => 'Erro nos itens'])->assertSessionHas('success');
         $this->assertSame(20, $first->fresh()->quantity);
         $this->assertSame(20, $second->fresh()->quantity);
         $this->assertNotNull($order->fresh()->cancelled_at);
@@ -637,7 +645,7 @@ class SalesFlowTest extends TestCase
         $this->assertSame(3, ProductStandStock::where('product_id', $second->id)->value('quantity'));
         $this->assertSame(110000, app(SalesMetrics::class)->build()['unit']['revenue_cents']);
 
-        $this->post('/sales/'.$unitOrder->items()->firstOrFail()->id.'/cancel')->assertSessionHas('success');
+        $this->post('/sales/'.$unitOrder->items()->firstOrFail()->id.'/cancel', ['cancellation_reason' => 'Cliente devolveu'])->assertSessionHas('success');
         $this->assertSame(20, $first->fresh()->quantity);
         $this->assertSame(20, $second->fresh()->quantity);
         $this->assertSame(5, ProductStandStock::where('product_id', $first->id)->value('quantity'));
@@ -735,5 +743,120 @@ class SalesFlowTest extends TestCase
         $this->assertSame(3, SaleOrder::count());
         $customer->update(['is_active' => false]);
         $this->get('/sales')->assertOk()->assertSee('Empresa Cliente')->assertSee('Cliente genérico');
+    }
+
+    public function test_damaged_bottles_received_at_warehouse_are_kept_out_of_available_stock(): void
+    {
+        $this->actingAs($this->owner());
+        $this->post('/products', [
+            'brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 5, 'damaged_quantity' => 2,
+            'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160,
+        ])->assertSessionHas('success');
+        $product = Product::firstOrFail();
+        $this->assertSame(5, $product->quantity);
+        $this->assertSame(2, $product->damaged_quantity);
+        $this->assertDatabaseHas('product_stock_entries', ['product_id' => $product->id, 'quantity_added' => 5, 'damaged_quantity_added' => 2]);
+        $this->get('/sales')->assertOk()->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 3);
+        $this->post('/sales/wholesale', ['product_id' => $product->id, 'quantity' => 4, 'truck_plate' => 'ABC-123-MP', 'driver_name' => 'Motorista'])->assertSessionHasErrors('items.0.quantity');
+
+        $this->post("/products/{$product->id}/stock", ['quantity_added' => 3, 'damaged_quantity_added' => 1])->assertSessionHas('success');
+        $this->assertSame(8, $product->fresh()->quantity);
+        $this->assertSame(3, $product->fresh()->damaged_quantity);
+        $this->post("/products/{$product->id}/damage", ['quantity' => 2, 'reason' => 'Válvula danificada'])->assertSessionHas('success');
+        $this->get('/sales')->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 3);
+        $this->get('/dashboard')->assertViewHas('damagedUnits', 5)->assertViewHas('projectedUnits', 3);
+        $this->assertSame(3, StockDamageEvent::where('product_id', $product->id)->count());
+    }
+
+    public function test_damaged_return_exchanges_available_units_and_refunds_the_remainder(): void
+    {
+        $this->actingAs($this->owner());
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 10, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $stand = Location::create(['name' => 'Banca Centro', 'kind' => 'physical', 'is_sales_point' => true]);
+        $this->post('/allocations', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 3])->assertSessionHas('success');
+        $this->post('/sales/unit', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 2])->assertSessionHas('success');
+        $item = ProductSale::firstOrFail();
+        $this->assertSame(1, ProductStandStock::firstOrFail()->available_quantity);
+
+        $url = "/sales/{$item->id}/return";
+        $this->post($url, ['quantity' => 2])->assertSessionHasErrors('reason');
+        $this->assertSame(0, StockDamageEvent::count());
+        $this->post($url, ['quantity' => 2, 'reason' => 'Botijas com fuga'])->assertSessionHas('success');
+        $this->assertSame(9, $product->fresh()->quantity);
+        $this->assertSame(0, $product->fresh()->damaged_quantity);
+        $this->assertSame(2, ProductStandStock::firstOrFail()->quantity);
+        $this->assertSame(2, ProductStandStock::firstOrFail()->damaged_quantity);
+        $this->assertSame(1, $item->fresh()->refunded_quantity);
+        $this->assertDatabaseHas('stock_damage_events', ['product_sale_id' => $item->id, 'kind' => 'exchange', 'quantity' => 1, 'refund_cents' => 0]);
+        $this->assertDatabaseHas('stock_damage_events', ['product_sale_id' => $item->id, 'kind' => 'refund', 'quantity' => 1, 'refund_cents' => 16000]);
+        $this->post($url, ['quantity' => 2, 'reason' => 'Outra avaria'])->assertSessionHasErrors('quantity');
+        $this->post("/sales/{$item->id}/cancel", ['cancellation_reason' => 'Anular'])->assertStatus(409);
+        $this->post('/sales/unit', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 1])->assertSessionHasErrors('items.0.quantity');
+
+        $metrics = app(SalesMetrics::class)->build();
+        $this->assertSame(1, $metrics['unit']['quantity']);
+        $this->assertSame(16000, $metrics['unit']['revenue_cents']);
+        $this->assertSame(6000, $metrics['unit']['margin_cents']);
+        $this->get('/sales')->assertOk()->assertSee('Troca / reembolso')->assertSee('Reembolsos hoje: 160,00 MT');
+        $date = now()->toDateString();
+        $this->get('/sales/history?period=day&date='.$date)->assertOk()
+            ->assertViewHas('summary', fn ($summary) => $summary['unit']['revenue_cents'] === 16000 && $summary['unit']['refund_cents'] === 16000)
+            ->assertViewHas('pointDaily', fn ($daily) => $daily['totals']['revenue_cents'] === 16000)
+            ->assertSee('Reembolsos realizados');
+        $pdf = $this->get('/sales/history/pdf?period=day&date='.$date)->assertOk()->getContent();
+        $this->assertStringContainsString('REEMBOLSOS', $pdf);
+        $this->assertStringContainsString('160,00 MT', $pdf);
+    }
+
+    public function test_wholesale_damaged_return_is_fully_refunded_when_central_stock_is_empty(): void
+    {
+        $this->actingAs($this->owner());
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 1, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $this->post('/sales/wholesale', ['product_id' => $product->id, 'quantity' => 1, 'truck_plate' => 'ABC-123-MP', 'driver_name' => 'Motorista'])->assertSessionHas('success');
+        $item = ProductSale::firstOrFail();
+        $this->post("/sales/{$item->id}/return", ['quantity' => 1, 'reason' => 'Válvula avariada'])->assertSessionHas('success');
+        $this->assertSame(1, $product->fresh()->quantity);
+        $this->assertSame(1, $product->fresh()->damaged_quantity);
+        $this->assertSame(0, app(SalesMetrics::class)->build()['wholesale']['revenue_cents']);
+        $this->assertDatabaseHas('stock_damage_events', ['product_sale_id' => $item->id, 'kind' => 'refund', 'refund_cents' => 14000]);
+    }
+
+    public function test_seller_can_mark_damage_only_at_their_assigned_stand(): void
+    {
+        $this->artisan('db:seed')->assertSuccessful();
+        $this->actingAs($this->owner());
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 10, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $ownStand = Location::create(['name' => 'Banca Centro', 'kind' => 'physical', 'is_sales_point' => true]);
+        $otherStand = Location::create(['name' => 'Banca Norte', 'kind' => 'physical', 'is_sales_point' => true]);
+        foreach ([$ownStand, $otherStand] as $stand) {
+            $this->post('/allocations', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 3])->assertSessionHas('success');
+        }
+        $seller = User::create(['name' => 'Vendedor Centro', 'username' => 'centro', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $ownStand->id]);
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $this->actingAs($seller);
+
+        $this->post('/sales/damages', ['product_id' => $product->id, 'location_id' => $otherStand->id, 'quantity' => 1, 'reason' => 'Fuga'])->assertForbidden();
+        $this->post('/sales/damages', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 2, 'reason' => 'Válvula avariada'])->assertSessionHas('success');
+        $this->assertDatabaseHas('product_stand_stocks', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 3, 'damaged_quantity' => 2]);
+        $this->assertDatabaseHas('product_stand_stocks', ['product_id' => $product->id, 'location_id' => $otherStand->id, 'quantity' => 3, 'damaged_quantity' => 0]);
+        $this->post('/sales/unit', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 2])->assertSessionHasErrors('items.0.quantity');
+        $this->post('/sales/unit', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 1])->assertSessionHas('success');
+    }
+
+    public function test_refund_is_counted_on_its_own_date_in_daily_history(): void
+    {
+        $this->actingAs($this->owner());
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 1, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $this->post('/sales/wholesale', ['product_id' => $product->id, 'quantity' => 1, 'truck_plate' => 'ABC-123-MP', 'driver_name' => 'Motorista'])->assertSessionHas('success');
+        $item = ProductSale::firstOrFail();
+        $yesterday = now()->subDay();
+        $item->order->update(['sold_at' => $yesterday]);
+        $item->update(['sold_at' => $yesterday]);
+        $this->post("/sales/{$item->id}/return", ['quantity' => 1, 'reason' => 'Botija com fuga'])->assertSessionHas('success');
+
+        $this->get('/sales/history?period=day&date='.now()->toDateString())->assertOk()
+            ->assertViewHas('summary', fn ($summary) => $summary['wholesale']['revenue_cents'] === -14000 && $summary['wholesale']['refund_cents'] === 14000);
+        $this->get('/sales/history?period=day&date='.$yesterday->toDateString())->assertOk()
+            ->assertViewHas('summary', fn ($summary) => $summary['wholesale']['revenue_cents'] === 14000 && $summary['wholesale']['refund_cents'] === 0);
     }
 }

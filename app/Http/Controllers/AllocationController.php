@@ -20,9 +20,11 @@ class AllocationController extends Controller
         $stands = Location::where('is_sales_point', true)->where('kind', 'physical')->orderBy('name')->get();
         $activeStands = $stands->where('is_active', true);
         $standStock = ProductStandStock::all()->groupBy('product_id')->map(fn ($balances) => $balances->pluck('quantity', 'location_id'));
+        $standDamaged = ProductStandStock::all()->groupBy('product_id')->map(fn ($balances) => $balances->pluck('damaged_quantity', 'location_id'));
         $centralStock = $products->mapWithKeys(fn (Product $product) => [$product->id => $balances->centralQuantity($product)]);
+        $centralDamaged = $products->mapWithKeys(fn (Product $product) => [$product->id => $product->damaged_quantity]);
         $inTransitStock = $products->mapWithKeys(fn (Product $product) => [$product->id => $balances->inTransitQuantity($product)]);
-        $centralTotal = $centralStock->sum();
+        $centralTotal = $centralStock->sum() + $centralDamaged->sum();
         $inTransitTotal = $inTransitStock->sum();
         $standTotals = $stands->mapWithKeys(fn (Location $stand) => [
             $stand->id => $products->sum(fn (Product $product) => (int) ($standStock->get($product->id)?->get($stand->id) ?? 0)),
@@ -30,7 +32,7 @@ class AllocationController extends Controller
         $overallTotal = $products->sum('quantity');
         $allocations = ProductAllocation::with(['product', 'location', 'createdBy'])->latest('id')->paginate(30);
 
-        return view('allocations.index', compact('products', 'allocatableProducts', 'stands', 'activeStands', 'standStock', 'centralStock', 'inTransitStock', 'centralTotal', 'inTransitTotal', 'standTotals', 'overallTotal', 'allocations'));
+        return view('allocations.index', compact('products', 'allocatableProducts', 'stands', 'activeStands', 'standStock', 'standDamaged', 'centralStock', 'centralDamaged', 'inTransitStock', 'centralTotal', 'inTransitTotal', 'standTotals', 'overallTotal', 'allocations'));
     }
 
     public function store(Request $request, InventoryBalances $balances)

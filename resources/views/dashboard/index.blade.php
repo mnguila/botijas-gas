@@ -31,6 +31,11 @@
         <strong>{{ number_format($productsWithStock, 0, ',', '.') }} <small>/ {{ number_format($productCount, 0, ',', '.') }}</small></strong>
         <span class="metric-help">Com quantidade acima de zero</span>
     </div>
+    <div class="dashboard-metric">
+        <span class="metric-label">Botijas avariadas</span>
+        <strong>{{ number_format($damagedUnits, 0, ',', '.') }}</strong>
+        <span class="metric-help">{{ number_format($damagedInvestmentCents / 100, 2, ',', '.') }} MT de investimento indisponível</span>
+    </div>
 </div>
 
 @if($unpricedCount > 0)
@@ -55,7 +60,7 @@
             <p>Se as mesmas botijas forem vendidas por unidade.</p>
         </div>
     </div>
-    <p class="muted">Cada valor é um cenário separado: (preço de venda − custo do fornecedor) × quantidade atual. Produtos sem os dois preços de venda definidos ficam fora da projeção.</p>
+    <p class="muted">Cada valor é um cenário separado: (preço de venda − custo do fornecedor) × botijas disponíveis. Avariadas, em trânsito e produtos sem preços completos ficam fora da projeção.</p>
 </section>
 @endif
 

@@ -4,7 +4,7 @@
 <div class="operations-heading"><div>
     <span class="section-eyebrow">Vendas de botijas</span>
     <h2 class="page-title">Histórico geral de vendas</h2>
-    <p class="page-subtitle">Consulte as vendas efetivas por dia, semana, mês e posto de venda.</p>
+    <p class="page-subtitle">Consulte vendas e reembolsos por dia, semana, mês e posto de venda.</p>
 </div>@if(auth()->user()->hasPermission('sales.create'))<a class="small-link" href="{{ route('sales.index') }}">← Voltar às vendas</a>@endif</div>
 
 <section class="panel sales-history-filter">
@@ -21,7 +21,7 @@
         </div>
         <div class="form-actions"><button type="submit">Consultar vendas</button><a class="small-link" href="{{ route('sales.history.pdf', array_filter(['period' => $period['key'], 'date' => $period['date'], 'location_id' => $selectedPoint?->id])) }}">Exportar este período em PDF ↓</a></div>
     </form>
-    <p class="muted">A semana começa na segunda-feira. Os totais excluem vendas canceladas. O resumo por posto usa sempre a data de referência. As despesas aprovadas são um total da empresa, mesmo quando seleciona um posto.</p>
+    <p class="muted">A semana começa na segunda-feira. Os valores são líquidos: reembolsos são descontados na data em que ocorreram. Vendas canceladas ficam de fora. O resumo por posto usa a data de referência. As despesas aprovadas são um total da empresa.</p>
 </section>
 
 @php
@@ -30,8 +30,8 @@
     $revenueChange = $previousRevenue > 0 ? ($currentRevenue - $previousRevenue) / $previousRevenue * 100 : null;
 @endphp
 <div class="sales-summary sales-history-summary">
-    <div class="sales-summary-card"><span>A grosso · {{ $period['label'] }}</span><strong>{{ number_format($summary['wholesale']['revenue_cents'] / 100, 2, ',', '.') }} MT</strong><small>{{ number_format($summary['wholesale']['orders'], 0, ',', '.') }} vendas · {{ number_format($summary['wholesale']['quantity'], 0, ',', '.') }} botijas</small>@if($canViewSalesProfit)<small class="history-profit">Lucro: {{ number_format($summary['wholesale']['margin_cents'] / 100, 2, ',', '.') }} MT</small>@endif</div>
-    <div class="sales-summary-card"><span>Por unidade · {{ $period['label'] }}</span><strong>{{ number_format($summary['unit']['revenue_cents'] / 100, 2, ',', '.') }} MT</strong><small>{{ number_format($summary['unit']['orders'], 0, ',', '.') }} vendas · {{ number_format($summary['unit']['quantity'], 0, ',', '.') }} botijas</small>@if($canViewSalesProfit)<small class="history-profit">Lucro: {{ number_format($summary['unit']['margin_cents'] / 100, 2, ',', '.') }} MT</small>@endif</div>
+    <div class="sales-summary-card"><span>A grosso · {{ $period['label'] }}</span><strong>{{ number_format($summary['wholesale']['revenue_cents'] / 100, 2, ',', '.') }} MT</strong><small>{{ number_format($summary['wholesale']['orders'], 0, ',', '.') }} vendas · {{ number_format($summary['wholesale']['quantity'], 0, ',', '.') }} botijas líquidas</small>@if($summary['wholesale']['refund_cents'] > 0)<small>Reembolsos: {{ number_format($summary['wholesale']['refund_cents'] / 100, 2, ',', '.') }} MT</small>@endif @if($canViewSalesProfit)<small class="history-profit">Lucro: {{ number_format($summary['wholesale']['margin_cents'] / 100, 2, ',', '.') }} MT</small>@endif</div>
+    <div class="sales-summary-card"><span>Por unidade · {{ $period['label'] }}</span><strong>{{ number_format($summary['unit']['revenue_cents'] / 100, 2, ',', '.') }} MT</strong><small>{{ number_format($summary['unit']['orders'], 0, ',', '.') }} vendas · {{ number_format($summary['unit']['quantity'], 0, ',', '.') }} botijas líquidas</small>@if($summary['unit']['refund_cents'] > 0)<small>Reembolsos: {{ number_format($summary['unit']['refund_cents'] / 100, 2, ',', '.') }} MT</small>@endif @if($canViewSalesProfit)<small class="history-profit">Lucro: {{ number_format($summary['unit']['margin_cents'] / 100, 2, ',', '.') }} MT</small>@endif</div>
     <div class="sales-summary-card"><span>Total · {{ $period['label'] }}</span><strong>{{ number_format($currentRevenue / 100, 2, ',', '.') }} MT</strong><small>{{ number_format($summary['wholesale']['orders'] + $summary['unit']['orders'], 0, ',', '.') }} vendas · {{ number_format($summary['wholesale']['quantity'] + $summary['unit']['quantity'], 0, ',', '.') }} botijas</small>@if($canViewSalesProfit)<small class="history-profit">Lucro total: {{ number_format(($summary['wholesale']['margin_cents'] + $summary['unit']['margin_cents']) / 100, 2, ',', '.') }} MT</small>@endif</div>
     <div class="sales-summary-card"><span>Despesas operacionais · Empresa · {{ $period['label'] }}</span><strong>{{ number_format($expenseSummary['amount_cents'] / 100, 2, ',', '.') }} MT</strong><small>{{ number_format($expenseSummary['count'], 0, ',', '.') }} {{ $expenseSummary['count'] === 1 ? 'despesa aprovada' : 'despesas aprovadas' }}</small></div>
 </div>
@@ -49,9 +49,9 @@
 
 <section class="panel">
     <h2>Vendas por posto · {{ $pointDaily['label'] }}</h2>
-    <p class="muted">Vendas por unidade nas bancas físicas. As vendas a grosso aparecem no total geral quando todos os postos estão selecionados.</p>
+    <p class="muted">Vendas por unidade menos reembolsos feitos nesta data. Um saldo negativo indica que houve mais reembolsos do que vendas no dia. As vendas a grosso aparecem no total geral quando todos os postos estão selecionados.</p>
     <div class="tablewrap"><table>
-        <thead><tr><th>Posto de venda</th><th class="num">Vendas</th><th class="num">Botijas</th><th class="num">Total vendido</th>@if($canViewSalesProfit)<th class="num">Margem</th>@endif</tr></thead>
+        <thead><tr><th>Posto de venda</th><th class="num">Vendas</th><th class="num">Botijas líquidas</th><th class="num">Valor líquido</th>@if($canViewSalesProfit)<th class="num">Margem</th>@endif</tr></thead>
         <tbody>@forelse($pointDaily['rows'] as $row)<tr>
             <td><a href="{{ route('sales.history', ['period' => $period['key'], 'date' => $period['date'], 'location_id' => $row['location']->id]) }}"><strong>{{ $row['location']->name }}</strong></a></td>
             <td class="num">{{ number_format($row['orders'], 0, ',', '.') }}</td>
@@ -65,9 +65,9 @@
 
 <section class="panel">
     <h2>Produtos por posto · {{ $pointDaily['label'] }}</h2>
-    <p class="muted">As vendas pertencem à data de referência. O estoque é o saldo atual da banca, não o saldo histórico desse dia. Até 5 botijas indica estoque baixo.</p>
+    <p class="muted">Botijas e valores mostram vendas menos reembolsos na data de referência. O estoque é o saldo disponível agora, sem as avariadas. Até 5 botijas indica estoque baixo.</p>
     <div class="tablewrap"><table>
-        <thead><tr><th>Posto</th><th>Produto</th><th class="num">Botijas vendidas</th><th class="num">Valor vendido</th><th class="num">Estoque atual</th>@if($canViewSalesProfit)<th class="num">Margem</th>@endif</tr></thead>
+        <thead><tr><th>Posto</th><th>Produto</th><th class="num">Botijas líquidas</th><th class="num">Valor líquido</th><th class="num">Estoque disponível</th>@if($canViewSalesProfit)<th class="num">Margem</th>@endif</tr></thead>
         <tbody>@php($hasProducts = false)@foreach($pointDaily['rows'] as $row)@foreach($row['products'] as $product)@php($hasProducts = true)<tr>
             <td>{{ $row['location']->name }}</td><td>{{ $product['label'] }}</td>
             <td class="num">{{ number_format($product['quantity'], 0, ',', '.') }}</td>
@@ -81,6 +81,7 @@
 
 <section class="panel">
     <h2>Vendas registadas · {{ $period['label'] }}</h2>
+    <p class="muted">A lista abaixo mostra as vendas na data original. Os reembolsos aparecem separadamente pela data em que foram realizados.</p>
     <div class="tablewrap"><table>
         <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Produtos</th><th>Destino / posto</th><th class="num">Botijas</th><th class="num">Total</th><th>Registado por</th></tr></thead>
         <tbody>@forelse($orders as $order)
@@ -98,5 +99,22 @@
         </tr>@empty<tr><td colspan="8" class="muted">Não há vendas efetivas neste período.</td></tr>@endforelse</tbody>
     </table></div>
     @if($orders->hasPages())<nav class="history-pages" aria-label="Páginas das vendas">@if($orders->previousPageUrl())<a href="{{ $orders->previousPageUrl() }}">← Anterior</a>@endif<span>Página {{ $orders->currentPage() }} de {{ $orders->lastPage() }}</span>@if($orders->nextPageUrl())<a href="{{ $orders->nextPageUrl() }}">Próxima →</a>@endif</nav>@endif
+</section>
+
+<section class="panel">
+    <h2>Reembolsos realizados · {{ $period['label'] }}</h2>
+    <div class="tablewrap"><table>
+        <thead><tr><th>Data</th><th>Venda original</th><th>Produto</th><th>Posto</th><th class="num">Botijas</th><th class="num">Valor devolvido</th><th>Motivo</th><th>Registado por</th></tr></thead>
+        <tbody>@forelse($refunds as $refund)<tr>
+            <td>{{ $refund->created_at->format('d/m/Y H:i') }}</td>
+            <td>#{{ str_pad((string) $refund->product_sale_id, 6, '0', STR_PAD_LEFT) }}</td>
+            <td>{{ $refund->saleItem?->product?->label ?? 'Produto removido' }}</td>
+            <td>{{ $refund->location?->name ?? 'Armazém central' }}</td>
+            <td class="num">{{ number_format($refund->quantity, 0, ',', '.') }}</td>
+            <td class="num">{{ number_format($refund->refund_cents / 100, 2, ',', '.') }} MT</td>
+            <td>{{ $refund->reason }}</td><td>{{ $refund->createdBy?->name ?? '—' }}</td>
+        </tr>@empty<tr><td colspan="8" class="muted">Não há reembolsos neste período.</td></tr>@endforelse</tbody>
+    </table></div>
+    @if($refunds->hasPages()){{ $refunds->links() }}@endif
 </section>
 @endsection

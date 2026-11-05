@@ -29,16 +29,16 @@
 <section class="panel">
     <h2>Estoque por local</h2>
     <div class="tablewrap"><table>
-        <thead><tr><th>Produto</th><th class="num">Estoque central</th><th class="num">Em trânsito</th>@foreach($stands as $stand)<th class="num">{{ $stand->name }}@unless($stand->is_active) (inativo)@endunless</th>@endforeach<th class="num">Total</th></tr></thead>
+        <thead><tr><th>Produto</th><th class="num">Estoque central</th><th class="num">Em trânsito</th>@foreach($stands as $stand)<th class="num">{{ $stand->name }}@unless($stand->is_active) (inativo)@endunless</th>@endforeach<th class="num">Total físico</th></tr></thead>
         <tbody>@forelse($products as $product)<tr>
             <td><strong>{{ $product->label }}</strong>
                 @unless($product->isReadyForSale())
                     <br><small class="muted">Pendente de preços · não pode ser alocado</small>
                 @endunless
             </td>
-            <td class="num">{{ number_format($centralStock[$product->id] ?? 0, 0, ',', '.') }}</td>
+            <td class="num">{{ number_format($centralStock[$product->id] ?? 0, 0, ',', '.') }} disponíveis @if($centralDamaged[$product->id] > 0)<small class="sale-date">{{ number_format($centralDamaged[$product->id], 0, ',', '.') }} avariadas</small>@endif</td>
             <td class="num">{{ number_format($inTransitStock[$product->id] ?? 0, 0, ',', '.') }}</td>
-            @foreach($stands as $stand)<td class="num">{{ number_format($standStock->get($product->id)?->get($stand->id) ?? 0, 0, ',', '.') }}</td>@endforeach
+            @foreach($stands as $stand)@php($physical = (int) ($standStock->get($product->id)?->get($stand->id) ?? 0))@php($damaged = (int) ($standDamaged->get($product->id)?->get($stand->id) ?? 0))<td class="num">{{ number_format($physical - $damaged, 0, ',', '.') }} disponíveis @if($damaged > 0)<small class="sale-date">{{ number_format($damaged, 0, ',', '.') }} avariadas</small>@endif</td>@endforeach
             <td class="num"><strong>{{ number_format($product->quantity, 0, ',', '.') }}</strong></td>
         </tr>@empty<tr><td colspan="{{ $stands->count() + 4 }}" class="muted">Ainda não há produtos.</td></tr>@endforelse</tbody>
         <tfoot><tr class="allocation-totals">

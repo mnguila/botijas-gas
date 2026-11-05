@@ -6,9 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 
 class ProductSale extends Model
 {
-    protected $fillable = ['sale_order_id', 'product_id', 'channel', 'location_id', 'vehicle_location_id', 'quantity', 'unit_price', 'unit_cost', 'truck_plate', 'driver_name', 'created_by_user_id', 'note', 'sold_at', 'cancelled_at', 'cancelled_by_user_id'];
+    protected $fillable = ['sale_order_id', 'product_id', 'channel', 'location_id', 'vehicle_location_id', 'quantity', 'refunded_quantity', 'unit_price', 'unit_cost', 'truck_plate', 'driver_name', 'created_by_user_id', 'note', 'sold_at', 'cancelled_at', 'cancelled_by_user_id'];
 
-    protected $casts = ['sold_at' => 'datetime', 'cancelled_at' => 'datetime'];
+    protected $casts = ['sold_at' => 'datetime', 'cancelled_at' => 'datetime', 'refunded_quantity' => 'integer'];
+
+    public function damageEvents()
+    {
+        return $this->hasMany(StockDamageEvent::class);
+    }
 
     public function product()
     {

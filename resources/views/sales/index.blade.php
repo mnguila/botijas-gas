@@ -15,6 +15,7 @@
                 · margem {{ number_format($metrics['wholesale']['today_margin_cents'] / 100, 2, ',', '.') }} MT
             @endif
         </small>
+        @if($metrics['wholesale']['today_refund_cents'] > 0)<small>Reembolsos hoje: {{ number_format($metrics['wholesale']['today_refund_cents'] / 100, 2, ',', '.') }} MT</small>@endif
     </div>
     <div class="sales-summary-card">
         <span>Unidade · hoje</span>
@@ -24,6 +25,7 @@
                 · margem {{ number_format($metrics['unit']['today_margin_cents'] / 100, 2, ',', '.') }} MT
             @endif
         </small>
+        @if($metrics['unit']['today_refund_cents'] > 0)<small>Reembolsos hoje: {{ number_format($metrics['unit']['today_refund_cents'] / 100, 2, ',', '.') }} MT</small>@endif
     </div>
     <div class="sales-summary-card">
         <span>Vendas acumuladas · hoje</span>
@@ -62,6 +64,22 @@
         @endif
     </div>
 </section>
+
+@if($canUnit && $stands->isNotEmpty())
+<section class="panel">
+    <h2>Botija avariada detetada na banca</h2>
+    <p class="muted">Use este registo se a avaria for encontrada antes de concluir a venda. Para uma botija já vendida, use “Troca / reembolso” na venda correspondente.</p>
+    <form method="post" action="{{ route('sales.damages.store') }}">@csrf
+        <div class="fields three">
+            <label>Posto<select name="location_id" required>@foreach($stands as $stand)<option value="{{ $stand->id }}" @selected(old('location_id') == $stand->id)>{{ $stand->name }}</option>@endforeach</select></label>
+            <label>Produto<select name="product_id" required>@foreach($products as $product)<option value="{{ $product->id }}" @selected(old('product_id') == $product->id)>{{ $product->label }}</option>@endforeach</select></label>
+            <label>Quantidade avariada<input type="number" name="quantity" min="1" max="1000000000" required></label>
+            <label class="field-wide">Descrição da avaria<input name="reason" maxlength="500" required></label>
+        </div>
+        <button type="submit" @disabled($products->isEmpty())>Registar avaria</button>
+    </form>
+</section>
+@endif
 
 @if($sellableProducts->isEmpty())
     <p class="muted">Ainda não há produtos disponíveis para venda. Defina o custo do fornecedor e os preços de revendedor e por unidade em Produtos.</p>
@@ -145,23 +163,64 @@
     </div>
 </dialog>
 
+<dialog class="sale-confirm-dialog" data-damaged-return-dialog aria-labelledby="damaged-return-title" aria-describedby="damaged-return-description">
+    <form method="post" class="sale-confirm-dialog-content" data-damaged-return-form>@csrf
+        <span class="section-eyebrow">Devolução de botija avariada</span>
+        <h2 id="damaged-return-title">Troca ou reembolso</h2>
+        <p id="damaged-return-description" data-damaged-return-description></p>
+        <label class="cancel-sale-reason">Quantidade devolvida
+            <input type="number" name="quantity" min="1" max="1" value="1" required data-damaged-return-quantity>
+        </label>
+        <label class="cancel-sale-reason">Descrição da avaria
+            <textarea name="reason" rows="3" maxlength="500" required data-damaged-return-reason></textarea>
+        </label>
+        <p class="muted">O sistema trocará as botijas disponíveis no mesmo local e registará o reembolso das restantes pelo preço da venda original.</p>
+        <div class="sale-confirm-actions">
+            <button type="button" class="sale-confirm-back" data-damaged-return-close>Voltar</button>
+            <button type="submit" class="sale-confirm-submit">Confirmar devolução</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog class="sale-confirm-dialog" data-cancel-sale-dialog aria-labelledby="cancel-sale-title" aria-describedby="cancel-sale-description">
+    <form method="post" class="sale-confirm-dialog-content" data-cancel-sale-form>@csrf
+        <input type="hidden" name="cancel_sale_id" data-cancel-sale-id>
+        <span class="section-eyebrow">Histórico de vendas</span>
+        <h2 id="cancel-sale-title">Cancelar venda</h2>
+        <p id="cancel-sale-description" data-cancel-sale-description></p>
+        <label class="cancel-sale-reason">Motivo do cancelamento
+            <textarea name="cancellation_reason" rows="4" maxlength="500" required data-cancel-sale-reason>{{ old('cancellation_reason') }}</textarea>
+        </label>
+        <div class="sale-confirm-actions">
+            <button type="button" class="sale-confirm-back" data-cancel-sale-close>Voltar</button>
+            <button type="submit" class="sale-confirm-submit">Confirmar cancelamento</button>
+        </div>
+    </form>
+</dialog>
+
 <section class="panel">
     <h2>Histórico de vendas</h2>
     <div class="tablewrap"><table>
         <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Produtos</th><th>Destino / posto</th><th class="num">Botijas</th><th class="num">Total</th><th>Registado por</th><th>Ações</th></tr></thead>
         <tbody>@forelse($orders as $order)
-        @php($orderQuantity = $order->items->sum('quantity'))
-        @php($orderTotal = $order->items->sum(fn ($item) => $item->quantity * $item->unit_price))
+        @php($orderQuantity = $order->items->sum(fn ($item) => $item->quantity - $item->refunded_quantity))
+        @php($orderTotal = $order->items->sum(fn ($item) => ($item->quantity - $item->refunded_quantity) * $item->unit_price))
+        @php($hasReturns = $order->items->contains(fn ($item) => $item->damageEvents->isNotEmpty()))
+        @php($orderNumber = str_pad((string) $order->items->min('id'), 6, '0', STR_PAD_LEFT))
         <tr>
-            <td><strong>#{{ str_pad((string) $order->items->min('id'), 6, '0', STR_PAD_LEFT) }}</strong><small class="sale-date">{{ $order->sold_at->format('d/m/Y H:i') }}</small></td>
+            <td><strong>#{{ $orderNumber }}</strong><small class="sale-date">{{ $order->sold_at->format('d/m/Y H:i') }}</small></td>
             <td><span class="pill">{{ $order->channel === 'wholesale' ? 'Grosso' : 'Unidade' }}</span></td>
             <td><strong>{{ $order->customer?->name ?? 'Cliente genérico' }}</strong>@if($order->customer?->nuit)<small class="sale-date">NUIT {{ $order->customer->nuit }}</small>@endif</td>
-            <td><div class="sale-lines">@foreach($order->items as $item)<div><strong>{{ $item->product->label }}</strong><small>{{ number_format($item->quantity, 0, ',', '.') }} × {{ number_format($item->unit_price, 2, ',', '.') }} MT</small></div>@endforeach</div></td>
+            <td><div class="sale-lines">@foreach($order->items as $item)<div><strong>{{ $item->product->label }}</strong><small>{{ number_format($item->quantity - $item->refunded_quantity, 0, ',', '.') }} × {{ number_format($item->unit_price, 2, ',', '.') }} MT</small>
+                @if($item->refunded_quantity > 0)<small>{{ number_format($item->refunded_quantity, 0, ',', '.') }} reembolsadas</small>@endif
+                @foreach($item->damageEvents as $event)<small>{{ $event->kind === 'exchange' ? 'Troca' : 'Reembolso' }} de {{ $event->quantity }} · {{ $event->reason }}</small>@endforeach
+                @if(!$order->cancelled_at && $item->quantity > $item->refunded_quantity)<button type="button" class="smallbtn" data-damaged-return data-return-url="{{ route('sales.return', $item) }}" data-return-product="{{ $item->product->label }}" data-return-max="{{ $item->quantity - $item->refunded_quantity }}">Troca / reembolso</button>@endif
+            </div>@endforeach</div></td>
             <td>@if($order->channel === 'wholesale'){{ $order->truck_plate }} · {{ $order->driver_name }}@else{{ $order->location?->name ?? '—' }}@endif</td>
             <td class="num">{{ number_format($orderQuantity, 0, ',', '.') }}</td>
             <td class="num"><strong>{{ number_format($orderTotal, 2, ',', '.') }} MT</strong></td>
             <td>{{ $order->createdBy?->name ?? '—' }}</td>
-            <td>@if(!$order->cancelled_at && $order->items->isNotEmpty())<div class="table-actions">@if($order->channel === 'wholesale')<a class="small-link" href="{{ route('sales.delivery-guide', $order->items->first()) }}">Guia PDF</a>@endif<form method="post" action="{{ route('sales.cancel', $order->items->first()) }}" onsubmit="return confirm('Cancelar esta venda e devolver {{ $orderQuantity }} botijas ao estoque?')">@csrf<button class="smallbtn danger" type="submit">Cancelar</button></form></div>@else<span class="muted">—</span>@endif</td>
+            <td>@if(!$order->cancelled_at && $order->items->isNotEmpty())<div class="table-actions">@if($order->channel === 'wholesale')<a class="small-link" href="{{ route('sales.delivery-guide', $order->items->first()) }}">Guia PDF</a>@endif @unless($hasReturns)<button class="smallbtn danger" type="button" data-cancel-sale data-cancel-url="{{ route('sales.cancel', $order->items->first()) }}" data-cancel-id="{{ $order->items->first()->id }}" data-cancel-number="{{ $orderNumber }}" data-cancel-quantity="{{ $orderQuantity }}">Cancelar</button>@endunless</div>@elseif($order->cancelled_at)<details class="cancel-sale-details"><summary>Motivo do cancelamento</summary><p>{{ $order->cancellation_reason ?? 'Motivo não registado anteriormente.' }}</p></details>@else<span class="muted">—</span>@endif</td>
         </tr>@empty<tr><td colspan="9" class="muted">Ainda não há vendas.</td></tr>@endforelse</tbody>
     </table></div>
     @if($orders->hasPages())<nav class="history-pages" aria-label="Páginas das vendas">@if($orders->previousPageUrl())<a href="{{ $orders->previousPageUrl() }}">← Anterior</a>@endif<span>Página {{ $orders->currentPage() }} de {{ $orders->lastPage() }}</span>@if($orders->nextPageUrl())<a href="{{ $orders->nextPageUrl() }}">Próxima →</a>@endif</nav>@endif
@@ -243,5 +302,52 @@ saleConfirmButton.addEventListener('click', () => {
     saleConfirmed = true;
     pendingSaleForm.requestSubmit();
 });
+
+const cancelSaleDialog = document.querySelector('[data-cancel-sale-dialog]');
+const cancelSaleForm = cancelSaleDialog.querySelector('[data-cancel-sale-form]');
+const cancelSaleReason = cancelSaleDialog.querySelector('[data-cancel-sale-reason]');
+const cancelSaleId = cancelSaleDialog.querySelector('[data-cancel-sale-id]');
+const openCancelSale = (button, preserveReason = false) => {
+    cancelSaleForm.action = button.dataset.cancelUrl;
+    cancelSaleId.value = button.dataset.cancelId;
+    cancelSaleDialog.querySelector('[data-cancel-sale-description]').textContent =
+        `Venda #${button.dataset.cancelNumber}: ${button.dataset.cancelQuantity} botijas serão devolvidas ao estoque. Indique o motivo para confirmar.`;
+    if (!preserveReason) cancelSaleReason.value = '';
+    cancelSaleReason.setCustomValidity('');
+    cancelSaleDialog.showModal();
+    cancelSaleReason.focus();
+};
+document.querySelectorAll('[data-cancel-sale]').forEach(button => {
+    button.addEventListener('click', () => openCancelSale(button));
+});
+cancelSaleDialog.querySelector('[data-cancel-sale-close]').addEventListener('click', () => cancelSaleDialog.close());
+cancelSaleReason.addEventListener('input', () => cancelSaleReason.setCustomValidity(''));
+cancelSaleForm.addEventListener('submit', event => {
+    cancelSaleReason.value = cancelSaleReason.value.trim();
+    if (!cancelSaleReason.value) {
+        event.preventDefault();
+        cancelSaleReason.setCustomValidity('Indique o motivo do cancelamento.');
+        cancelSaleReason.reportValidity();
+    }
+});
+@if($errors->has('cancellation_reason') && old('cancel_sale_id'))
+const failedCancelButton = [...document.querySelectorAll('[data-cancel-sale]')]
+    .find(button => button.dataset.cancelId === @json((string) old('cancel_sale_id')));
+if (failedCancelButton) openCancelSale(failedCancelButton, true);
+@endif
+
+const damagedReturnDialog = document.querySelector('[data-damaged-return-dialog]');
+const damagedReturnForm = damagedReturnDialog.querySelector('[data-damaged-return-form]');
+document.querySelectorAll('[data-damaged-return]').forEach(button => button.addEventListener('click', () => {
+    damagedReturnForm.action = button.dataset.returnUrl;
+    damagedReturnDialog.querySelector('[data-damaged-return-description]').textContent = `Produto: ${button.dataset.returnProduct}. Pode devolver até ${button.dataset.returnMax} botijas desta venda.`;
+    const quantity = damagedReturnDialog.querySelector('[data-damaged-return-quantity]');
+    quantity.max = button.dataset.returnMax;
+    quantity.value = 1;
+    damagedReturnDialog.querySelector('[data-damaged-return-reason]').value = '';
+    damagedReturnDialog.showModal();
+    quantity.focus();
+}));
+damagedReturnDialog.querySelector('[data-damaged-return-close]').addEventListener('click', () => damagedReturnDialog.close());
 </script>
 @endpush

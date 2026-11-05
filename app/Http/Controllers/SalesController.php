@@ -8,6 +8,7 @@ use App\Models\OperationalExpense;
 use App\Models\Product;
 use App\Models\ProductSale;
 use App\Models\ProductStandStock;
+use App\Models\StockDamageEvent;
 use App\Models\SaleOrder;
 use App\Models\User;
 use App\Services\InventoryBalances;
@@ -37,11 +38,11 @@ class SalesController extends Controller
         $centralStock = $products->mapWithKeys(fn (Product $product) => [$product->id => $balances->centralQuantity($product)]);
         $standStock = ProductStandStock::whereIn('location_id', $stands->pluck('id'))
             ->whereIn('product_id', $products->pluck('id'))
-            ->get(['location_id', 'product_id', 'quantity'])
+            ->get(['location_id', 'product_id', 'quantity', 'damaged_quantity'])
             ->groupBy('location_id')
-            ->map(fn ($rows) => $rows->pluck('quantity', 'product_id'));
+            ->map(fn ($rows) => $rows->mapWithKeys(fn ($row) => [$row->product_id => $row->available_quantity]));
         $orders = $this->groupSalesQuery(auth()->user())
-            ->with(['items.product', 'customer', 'location', 'createdBy'])
+            ->with(['items.product', 'items.damageEvents', 'customer', 'location', 'createdBy'])
             ->latest('id')->paginate(50);
         $metrics = $salesMetrics->build(auth()->user());
         $canViewSalesProfit = auth()->user()->canViewSalesProfit();
@@ -58,7 +59,10 @@ class SalesController extends Controller
         return view('sales.history', [
             'orders' => (clone $query)->with(['items.product', 'customer', 'location', 'createdBy'])
                 ->orderByDesc('sold_at')->orderByDesc('id')->paginate(50)->withQueryString(),
-            'summary' => $this->historySummary($query),
+            'summary' => $this->historySummary($query, $period, $point?->id),
+            'refunds' => $this->historyRefunds($period, $point?->id)
+                ->with(['saleItem.product', 'saleItem.order', 'location', 'createdBy'])
+                ->orderByDesc('created_at')->orderByDesc('id')->paginate(30, ['*'], 'refund_page')->withQueryString(),
             'expenseSummary' => $this->historyExpenseSummary($period),
             'pointDaily' => $this->historyPointDaily($period['date'], $point?->id),
             'previousSummary' => $this->historyPreviousSummary($period, $point?->id),
@@ -78,7 +82,9 @@ class SalesController extends Controller
             ->orderBy('sold_at')->orderBy('id')->get();
         $filename = 'historico-vendas-'.$period['key'].'-'.$period['date'].($point ? '-posto-'.$point->id : '').'.pdf';
 
-        return response($pdf->render($orders, $period['label'].($point ? ' · '.$point->name : ''), $this->historySummary($query), $this->historyExpenseSummary($period), $request->user()->canViewSalesProfit(), $this->historyPointDaily($period['date'], $point?->id)), 200, [
+        $refunds = $this->historyRefunds($period, $point?->id)
+            ->with(['saleItem.product', 'saleItem.order', 'location'])->orderBy('created_at')->orderBy('id')->get();
+        return response($pdf->render($orders, $period['label'].($point ? ' · '.$point->name : ''), $this->historySummary($query, $period, $point?->id), $this->historyExpenseSummary($period), $request->user()->canViewSalesProfit(), $this->historyPointDaily($period['date'], $point?->id), $refunds), 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="'.$filename.'"',
             'Cache-Control' => 'private, no-store',
@@ -143,7 +149,20 @@ class SalesController extends Controller
 
         return ['label' => match ($period['key']) {
             'day' => 'dia anterior', 'week' => 'semana anterior', 'month' => 'mês anterior',
-        }, 'summary' => $this->historySummary($this->historyQuery($previous, $locationId))];
+        }, 'summary' => $this->historySummary($this->historyQuery($previous, $locationId), $previous, $locationId)];
+    }
+
+    private function historyRefunds(array $period, ?int $locationId = null): Builder
+    {
+        $query = StockDamageEvent::query()->where('kind', 'refund')
+            ->whereHas('saleItem.order', fn ($orders) => $orders->whereNull('cancelled_at'));
+        if ($locationId !== null) $query->where('location_id', $locationId);
+        if ($period['start']) {
+            $query->where('created_at', '>=', $period['start']->format('Y-m-d H:i:s'))
+                ->where('created_at', '<', $period['end']->format('Y-m-d H:i:s'));
+        }
+
+        return $query;
     }
 
     private function historyExpenseSummary(array $period): array
@@ -200,6 +219,32 @@ class SalesController extends Controller
                 }
             });
 
+        $refundPeriod = [
+            'start' => $reference, 'end' => $reference->addDay(),
+        ];
+        $this->historyRefunds($refundPeriod)->whereIn('location_id', array_keys($rows))
+            ->with(['saleItem.product'])->chunkById(500, function ($events) use (&$rows) {
+                foreach ($events as $event) {
+                    if (! isset($rows[$event->location_id])) continue;
+                    $item = $event->saleItem;
+                    $costCents = (int) round((float) $item->unit_cost * 100);
+                    $marginCents = $event->refund_cents - $event->quantity * $costCents;
+                    $row = &$rows[$event->location_id];
+                    $row['quantity'] -= $event->quantity;
+                    $row['revenue_cents'] -= $event->refund_cents;
+                    $row['margin_cents'] -= $marginCents;
+                    $product = &$row['products'][$item->product_id];
+                    if (! isset($product)) $product = [
+                        'label' => $item->product?->label ?? 'Produto removido',
+                        'quantity' => 0, 'revenue_cents' => 0, 'margin_cents' => 0, 'stock' => 0,
+                    ];
+                    $product['quantity'] -= $event->quantity;
+                    $product['revenue_cents'] -= $event->refund_cents;
+                    $product['margin_cents'] -= $marginCents;
+                    unset($product, $row);
+                }
+            });
+
         $stocks = ProductStandStock::whereIn('location_id', array_keys($rows))->with('product')->get();
         foreach ($stocks as $stock) {
             if (! $stock->product) continue;
@@ -208,7 +253,7 @@ class SalesController extends Controller
                 'label' => $stock->product->label,
                 'quantity' => 0, 'revenue_cents' => 0, 'margin_cents' => 0, 'stock' => 0,
             ];
-            $product['stock'] = $stock->quantity;
+            $product['stock'] = $stock->available_quantity;
             unset($product);
         }
         foreach ($rows as &$row) {
@@ -229,11 +274,11 @@ class SalesController extends Controller
         ];
     }
 
-    private function historySummary(Builder $query): array
+    private function historySummary(Builder $query, array $period, ?int $locationId): array
     {
         $summary = [
-            'wholesale' => ['orders' => 0, 'quantity' => 0, 'revenue_cents' => 0, 'margin_cents' => 0],
-            'unit' => ['orders' => 0, 'quantity' => 0, 'revenue_cents' => 0, 'margin_cents' => 0],
+            'wholesale' => ['orders' => 0, 'quantity' => 0, 'revenue_cents' => 0, 'margin_cents' => 0, 'refunds' => 0, 'refund_quantity' => 0, 'refund_cents' => 0],
+            'unit' => ['orders' => 0, 'quantity' => 0, 'revenue_cents' => 0, 'margin_cents' => 0, 'refunds' => 0, 'refund_quantity' => 0, 'refund_cents' => 0],
         ];
         (clone $query)->with('items:id,sale_order_id,quantity,unit_price,unit_cost')
             ->chunkById(500, function ($orders) use (&$summary) {
@@ -248,6 +293,20 @@ class SalesController extends Controller
                     }
                 }
             }, 'id');
+
+        $this->historyRefunds($period, $locationId)->with('saleItem')->chunkById(500, function ($events) use (&$summary) {
+            foreach ($events as $event) {
+                $item = $event->saleItem;
+                $channel = $item->channel;
+                $costCents = (int) round((float) $item->unit_cost * 100);
+                $summary[$channel]['quantity'] -= $event->quantity;
+                $summary[$channel]['revenue_cents'] -= $event->refund_cents;
+                $summary[$channel]['margin_cents'] -= $event->refund_cents - $event->quantity * $costCents;
+                $summary[$channel]['refunds']++;
+                $summary[$channel]['refund_quantity'] += $event->quantity;
+                $summary[$channel]['refund_cents'] += $event->refund_cents;
+            }
+        });
 
         return $summary;
     }
@@ -349,7 +408,7 @@ class SalesController extends Controller
                 }
                 $standBalance = ProductStandStock::where('product_id', $product->id)
                     ->where('location_id', $stand->id)->first();
-                if (! $standBalance || $standBalance->quantity < $item['quantity']) {
+                if (! $standBalance || $standBalance->available_quantity < $item['quantity']) {
                     throw ValidationException::withMessages(["items.{$index}.quantity" => "Estoque insuficiente de {$product->label} na banca escolhida."]);
                 }
 
@@ -368,13 +427,115 @@ class SalesController extends Controller
         return back()->with('success', 'Venda por unidade registada.');
     }
 
+    public function reportStandDamage(Request $request, InventoryBalances $balances)
+    {
+        $reason = $request->input('reason');
+        if (is_string($reason)) $request->merge(['reason' => trim($reason)]);
+        $data = $request->validate([
+            'product_id' => ['required', 'integer', 'exists:products,id'],
+            'location_id' => ['required', 'integer', 'exists:locations,id'],
+            'quantity' => ['required', 'integer', 'min:1', 'max:1000000000'],
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+        $point = $request->user()->is_super_admin ? null : $request->user()->salesLocation;
+        abort_if($point && $point->id !== (int) $data['location_id'], 403);
+
+        DB::transaction(function () use ($data, $request, $balances) {
+            $product = $balances->lockProduct((int) $data['product_id']);
+            $stand = Location::whereKey($data['location_id'])->where('kind', 'physical')->where('is_sales_point', true)->first();
+            if (! $stand) throw ValidationException::withMessages(['location_id' => 'Escolha uma banca válida.']);
+            $stock = ProductStandStock::where('product_id', $product->id)->where('location_id', $stand->id)->first();
+            if (! $stock || $stock->available_quantity < $data['quantity']) {
+                throw ValidationException::withMessages(['quantity' => 'Não há botijas disponíveis suficientes nesta banca.']);
+            }
+            $stock->increment('damaged_quantity', $data['quantity']);
+            StockDamageEvent::create([
+                'product_id' => $product->id, 'location_id' => $stand->id,
+                'kind' => 'detected', 'quantity' => $data['quantity'], 'reason' => $data['reason'],
+                'created_by_user_id' => $request->user()->id,
+            ]);
+        });
+
+        return back()->with('success', 'Avaria registada. As botijas não podem ser vendidas.');
+    }
+
+    public function returnDamaged(Request $request, ProductSale $sale, InventoryBalances $balances)
+    {
+        $this->authorizeSalePoint($request, $sale->order);
+        $reason = $request->input('reason');
+        if (is_string($reason)) $request->merge(['reason' => trim($reason)]);
+        $data = $request->validate([
+            'quantity' => ['required', 'integer', 'min:1', 'max:1000000000'],
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        [$exchanged, $refunded, $refundCents] = DB::transaction(function () use ($request, $sale, $balances, $data) {
+            $order = SaleOrder::whereKey($sale->sale_order_id)->lockForUpdate()->firstOrFail();
+            abort_if($order->cancelled_at, 409, 'Esta venda foi cancelada.');
+            $item = ProductSale::whereKey($sale->id)->lockForUpdate()->firstOrFail();
+            if ($data['quantity'] > $item->quantity - $item->refunded_quantity) {
+                throw ValidationException::withMessages(['quantity' => 'A quantidade excede as botijas ainda não reembolsadas deste item.']);
+            }
+            $product = $balances->lockProduct($item->product_id, true);
+            $stand = null;
+            if ($order->channel === 'unit') {
+                $stand = ProductStandStock::firstOrCreate(
+                    ['product_id' => $product->id, 'location_id' => $order->location_id], ['quantity' => 0, 'damaged_quantity' => 0]
+                );
+                $available = $stand->available_quantity;
+            } else {
+                $available = $balances->centralQuantity($product);
+            }
+            $exchanged = ! $product->trashed() && $product->isReadyForSale()
+                ? min($available, (int) $data['quantity']) : 0;
+            $refunded = (int) $data['quantity'] - $exchanged;
+            $refundCents = $refunded * (int) round((float) $item->unit_price * 100);
+
+            if ($refunded > 0) {
+                if ($product->quantity > 1000000000 - $refunded || ($stand && $stand->quantity > 1000000000 - $refunded)) {
+                    throw ValidationException::withMessages(['quantity' => 'O saldo ultrapassaria o limite permitido.']);
+                }
+                $product->increment('quantity', $refunded);
+                if ($stand) $stand->increment('quantity', $refunded);
+                $item->increment('refunded_quantity', $refunded);
+            }
+            if ($stand) $stand->increment('damaged_quantity', (int) $data['quantity']);
+            else $product->increment('damaged_quantity', (int) $data['quantity']);
+
+            foreach (['exchange' => $exchanged, 'refund' => $refunded] as $kind => $quantity) {
+                if ($quantity === 0) continue;
+                StockDamageEvent::create([
+                    'product_id' => $product->id,
+                    'location_id' => $order->channel === 'unit' ? $order->location_id : null,
+                    'product_sale_id' => $item->id,
+                    'kind' => $kind, 'quantity' => $quantity,
+                    'refund_cents' => $kind === 'refund' ? $refundCents : 0,
+                    'reason' => $data['reason'], 'created_by_user_id' => $request->user()->id,
+                ]);
+            }
+
+            return [$exchanged, $refunded, $refundCents];
+        });
+
+        $message = "Avaria registada: {$exchanged} botijas trocadas";
+        if ($refunded) $message .= ' e '.$refunded.' reembolsadas ('.number_format($refundCents / 100, 2, ',', '.').' MT a devolver ao cliente)';
+
+        return back()->with('success', $message.'.');
+    }
+
     public function cancel(Request $request, ProductSale $sale, InventoryBalances $balances)
     {
         $this->authorizeSalePoint($request, $sale->order);
+        $reason = $request->input('cancellation_reason');
+        if (is_string($reason)) $request->merge(['cancellation_reason' => trim($reason)]);
+        $data = $request->validate([
+            'cancellation_reason' => ['required', 'string', 'max:500'],
+        ]);
 
-        DB::transaction(function () use ($request, $sale, $balances) {
+        DB::transaction(function () use ($request, $sale, $balances, $data) {
             $order = SaleOrder::whereKey($sale->sale_order_id)->lockForUpdate()->firstOrFail();
             abort_if($order->cancelled_at, 409, 'Esta venda já foi cancelada.');
+            abort_if($order->items()->whereHas('damageEvents')->exists(), 409, 'Esta venda já tem trocas ou reembolsos.');
 
             foreach ($order->items()->orderBy('product_id')->get() as $item) {
                 $product = $balances->lockProduct($item->product_id, true);
@@ -390,7 +551,11 @@ class SalesController extends Controller
             }
 
             $cancelledAt = now();
-            $order->update(['cancelled_at' => $cancelledAt, 'cancelled_by_user_id' => $request->user()->id]);
+            $order->update([
+                'cancelled_at' => $cancelledAt,
+                'cancelled_by_user_id' => $request->user()->id,
+                'cancellation_reason' => $data['cancellation_reason'],
+            ]);
             $order->items()->update(['cancelled_at' => $cancelledAt, 'cancelled_by_user_id' => $request->user()->id]);
         });
 

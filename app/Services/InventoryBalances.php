@@ -21,6 +21,11 @@ class InventoryBalances
 
     public function centralQuantity(Product $product): int
     {
+        return $this->centralPhysicalQuantity($product) - $product->damaged_quantity;
+    }
+
+    public function centralPhysicalQuantity(Product $product): int
+    {
         $inStands = (int) ProductStandStock::where('product_id', $product->id)->sum('quantity');
 
         return $product->quantity - $inStands - $this->inTransitQuantity($product);
