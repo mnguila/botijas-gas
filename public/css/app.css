@@ -182,7 +182,7 @@ button.item-add{margin:11px 0 0;padding:7px 0;background:transparent;border:0;co
 @media(max-width:650px){.profile-identity{flex-wrap:wrap;padding:20px}.profile-avatar{width:54px;height:54px}.profile-status{margin-left:0}.profile-facts{grid-template-columns:1fr}}
 
 /* Módulos */
-.modules-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,380px));gap:18px;margin-top:24px}
+.modules-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:18px;margin-top:24px}
 .module-card{display:flex;flex-direction:column;min-height:267px;padding:27px;background:#fff;border:1px solid #dfe9e8;border-radius:17px;box-shadow:0 8px 25px #173b4708}
 .module-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .module-card-icon{display:grid;place-items:center;width:49px;height:49px;background:#e3f5ed;border-radius:13px;color:#0b9b7c}.module-card-icon svg{width:25px;height:25px}
