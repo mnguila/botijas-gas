@@ -65,22 +65,6 @@
     </div>
 </section>
 
-@if($canUnit && $stands->isNotEmpty())
-<section class="panel">
-    <h2>Botija avariada detetada na banca</h2>
-    <p class="muted">Use este registo se a avaria for encontrada antes de concluir a venda. Para uma botija já vendida, use “Troca / reembolso” na venda correspondente.</p>
-    <form method="post" action="{{ route('sales.damages.store') }}">@csrf
-        <div class="fields three">
-            <label>Posto<select name="location_id" required>@foreach($stands as $stand)<option value="{{ $stand->id }}" @selected(old('location_id') == $stand->id)>{{ $stand->name }}</option>@endforeach</select></label>
-            <label>Produto<select name="product_id" required>@foreach($products as $product)<option value="{{ $product->id }}" @selected(old('product_id') == $product->id)>{{ $product->label }}</option>@endforeach</select></label>
-            <label>Quantidade avariada<input type="number" name="quantity" min="1" max="1000000000" required></label>
-            <label class="field-wide">Descrição da avaria<input name="reason" maxlength="500" required></label>
-        </div>
-        <button type="submit" @disabled($products->isEmpty())>Registar avaria</button>
-    </form>
-</section>
-@endif
-
 @if($sellableProducts->isEmpty())
     <p class="muted">Ainda não há produtos disponíveis para venda. Defina o custo do fornecedor e os preços de revendedor e por unidade em Produtos.</p>
 @endif

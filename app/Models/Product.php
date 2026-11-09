@@ -9,6 +9,12 @@ class Product extends Model
     protected $fillable = ['brand', 'weight_kg', 'description', 'quantity', 'damaged_quantity', 'purchase_price', 'reseller_price', 'unit_price'];
 
     protected $casts = ['quantity' => 'integer', 'damaged_quantity' => 'integer'];
+
+    public function stockEntries()
+    {
+        return $this->hasMany(ProductStockEntry::class);
+    }
+
     public function getLabelAttribute(): string { return "Botija {$this->weight_kg}Kg · {$this->brand}"; }
 
     public function isReadyForSale(): bool

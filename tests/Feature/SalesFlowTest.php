@@ -745,27 +745,103 @@ class SalesFlowTest extends TestCase
         $this->get('/sales')->assertOk()->assertSee('Empresa Cliente')->assertSee('Cliente genérico');
     }
 
-    public function test_damaged_bottles_received_at_warehouse_are_kept_out_of_available_stock(): void
+    public function test_warehouse_damage_is_registered_separately_from_product_stock_entries(): void
     {
         $this->actingAs($this->owner());
         $this->post('/products', [
-            'brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 5, 'damaged_quantity' => 2,
+            'brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 5,
             'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160,
         ])->assertSessionHas('success');
         $product = Product::firstOrFail();
         $this->assertSame(5, $product->quantity);
-        $this->assertSame(2, $product->damaged_quantity);
-        $this->assertDatabaseHas('product_stock_entries', ['product_id' => $product->id, 'quantity_added' => 5, 'damaged_quantity_added' => 2]);
+        $this->post('/damages', ['product_id' => $product->id, 'quantity' => 2, 'reason' => 'Avaria na chegada'])->assertSessionHas('success');
+        $this->assertSame(2, $product->fresh()->damaged_quantity);
+        $this->get('/dashboard')->assertViewHas('totalUnits', 3)->assertViewHas('damagedUnits', 2);
+        $this->get('/products')->assertSee('3 disponíveis')->assertSee('2 avariadas à parte');
+        $this->get('/allocations')->assertViewHas('centralTotal', 3)->assertViewHas('overallTotal', 3);
+        $this->assertDatabaseHas('product_stock_entries', ['product_id' => $product->id, 'quantity_added' => 5, 'damaged_quantity_added' => 0]);
+        $this->post('/products', ['brand' => 'Outra', 'weight_kg' => 6, 'quantity' => 1, 'damaged_quantity' => 1, 'purchase_price' => 100])->assertSessionHasErrors('damaged_quantity');
         $this->get('/sales')->assertOk()->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 3);
         $this->post('/sales/wholesale', ['product_id' => $product->id, 'quantity' => 4, 'truck_plate' => 'ABC-123-MP', 'driver_name' => 'Motorista'])->assertSessionHasErrors('items.0.quantity');
 
-        $this->post("/products/{$product->id}/stock", ['quantity_added' => 3, 'damaged_quantity_added' => 1])->assertSessionHas('success');
+        $this->post("/products/{$product->id}/stock", ['quantity_added' => 3])->assertSessionHas('success');
+        $this->post("/products/{$product->id}/stock", ['quantity_added' => 1, 'damaged_quantity_added' => 1])->assertSessionHasErrors('damaged_quantity_added');
         $this->assertSame(8, $product->fresh()->quantity);
+        $this->post('/damages', ['product_id' => $product->id, 'quantity' => 1, 'reason' => 'Válvula danificada'])->assertSessionHas('success');
         $this->assertSame(3, $product->fresh()->damaged_quantity);
-        $this->post("/products/{$product->id}/damage", ['quantity' => 2, 'reason' => 'Válvula danificada'])->assertSessionHas('success');
+        $this->post('/damages', ['product_id' => $product->id, 'quantity' => 2, 'reason' => 'Válvula danificada'])->assertSessionHas('success');
         $this->get('/sales')->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 3);
-        $this->get('/dashboard')->assertViewHas('damagedUnits', 5)->assertViewHas('projectedUnits', 3);
+        $this->get('/dashboard')->assertViewHas('damagedUnits', 5)->assertViewHas('totalUnits', 3)->assertViewHas('projectedUnits', 3);
         $this->assertSame(3, StockDamageEvent::where('product_id', $product->id)->count());
+    }
+
+    public function test_supplier_replacements_restore_only_damaged_units_at_the_receiving_location(): void
+    {
+        $this->artisan('db:seed')->assertSuccessful();
+        $this->actingAs($this->owner());
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 10, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $stand = Location::create(['name' => 'Banca Centro', 'kind' => 'physical', 'is_sales_point' => true]);
+        $this->post('/allocations', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 4])->assertSessionHas('success');
+        $this->post('/damages', ['product_id' => $product->id, 'quantity' => 2, 'reason' => 'Fuga'])->assertSessionHas('success');
+        $this->post('/damages', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 3, 'reason' => 'Válvula'])->assertSessionHas('success');
+        $this->post('/damages', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 2, 'reason' => 'Excesso'])->assertSessionHasErrors('quantity');
+
+        $replace = ['product_id' => $product->id, 'quantity' => 1, 'destination' => 'central', 'supplier_name' => 'Fornecedor A', 'reference' => 'GUIA-42'];
+        $this->post('/damages/replacements', [...$replace, 'quantity' => 3])->assertSessionHasErrors('quantity');
+        $this->post('/damages/replacements', $replace)->assertSessionHas('success');
+        $this->assertSame(1, $product->fresh()->damaged_quantity);
+        $this->assertSame(10, $product->fresh()->quantity);
+
+        $this->post('/damages/replacements', [...$replace, 'location_id' => $stand->id, 'destination' => 'same'])->assertSessionHas('success');
+        $this->assertDatabaseHas('product_stand_stocks', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 4, 'damaged_quantity' => 2]);
+        $this->post('/damages/replacements', [...$replace, 'location_id' => $stand->id, 'quantity' => 2])->assertSessionHas('success');
+        $this->assertDatabaseHas('product_stand_stocks', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 2, 'damaged_quantity' => 0]);
+        $this->get('/sales')->assertOk()->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 7)
+            ->assertViewHas('standStock', fn ($stock) => $stock[$stand->id][$product->id] === 2);
+        $this->get('/damages')->assertOk()->assertSee('GUIA-42')->assertSee('Troca do fornecedor')
+            ->assertViewHas('centralDamaged', 1)->assertViewHas('standDamaged', 0);
+        $this->assertDatabaseHas('stock_damage_events', [
+            'product_id' => $product->id, 'location_id' => $stand->id,
+            'received_location_id' => null, 'kind' => 'supplier_replacement',
+            'quantity' => 2, 'supplier_name' => 'Fornecedor A', 'reference' => 'GUIA-42',
+        ]);
+
+        $seller = User::create(['name' => 'Vendedor', 'username' => 'vendedor', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $stand->id]);
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $this->actingAs($seller)->get('/damages')->assertOk()->assertDontSee('Confirmar troca');
+        $this->post('/damages/replacements', $replace)->assertForbidden();
+    }
+
+    public function test_damage_registration_only_uses_existing_stock_and_replacement_restores_availability(): void
+    {
+        $this->actingAs($this->owner());
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 3, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $this->get('/damages')->assertOk()->assertDontSee('Como foi encontrada')->assertDontSee('Local onde foi encontrada');
+        $this->post('/damages', [
+            'source' => 'receipt', 'product_id' => $product->id,
+            'quantity' => 3, 'reason' => 'Três válvulas danificadas na entrega',
+        ])->assertSessionHasErrors('source');
+        $this->assertSame(3, $product->fresh()->quantity);
+        $this->assertSame(0, $product->fresh()->damaged_quantity);
+        $this->post('/damages', [
+            'product_id' => $product->id, 'quantity' => 4, 'reason' => 'Válvulas danificadas',
+        ])->assertSessionHasErrors('quantity');
+        $this->post('/damages', [
+            'product_id' => $product->id, 'quantity' => 3, 'reason' => 'Três válvulas danificadas na entrega',
+        ])->assertSessionHas('success');
+        $this->assertSame(3, $product->fresh()->quantity);
+        $this->assertSame(3, $product->fresh()->damaged_quantity);
+        $this->assertSame(0, \App\Models\ProductStockEntry::count());
+        $this->assertDatabaseHas('stock_damage_events', ['product_id' => $product->id, 'kind' => 'detected', 'quantity' => 3]);
+        $this->get('/sales')->assertOk()->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 0);
+        $this->post('/damages/replacements', [
+            'product_id' => $product->id, 'quantity' => 2, 'destination' => 'central',
+            'supplier_name' => 'Fornecedor A',
+        ])->assertSessionHas('success');
+        $this->assertSame(3, $product->fresh()->quantity);
+        $this->assertSame(1, $product->fresh()->damaged_quantity);
+        $this->get('/sales')->assertViewHas('centralStock', fn ($stock) => $stock[$product->id] === 2);
+        $this->get('/dashboard')->assertViewHas('totalUnits', 2)->assertViewHas('damagedUnits', 1);
     }
 
     public function test_damaged_return_exchanges_available_units_and_refunds_the_remainder(): void
@@ -835,8 +911,8 @@ class SalesFlowTest extends TestCase
         $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
         $this->actingAs($seller);
 
-        $this->post('/sales/damages', ['product_id' => $product->id, 'location_id' => $otherStand->id, 'quantity' => 1, 'reason' => 'Fuga'])->assertForbidden();
-        $this->post('/sales/damages', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 2, 'reason' => 'Válvula avariada'])->assertSessionHas('success');
+        $this->post('/damages', ['product_id' => $product->id, 'location_id' => $otherStand->id, 'quantity' => 1, 'reason' => 'Fuga'])->assertForbidden();
+        $this->post('/damages', ['product_id' => $product->id, 'quantity' => 2, 'reason' => 'Válvula avariada'])->assertSessionHas('success');
         $this->assertDatabaseHas('product_stand_stocks', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 3, 'damaged_quantity' => 2]);
         $this->assertDatabaseHas('product_stand_stocks', ['product_id' => $product->id, 'location_id' => $otherStand->id, 'quantity' => 3, 'damaged_quantity' => 0]);
         $this->post('/sales/unit', ['product_id' => $product->id, 'location_id' => $ownStand->id, 'quantity' => 2])->assertSessionHasErrors('items.0.quantity');
@@ -858,5 +934,49 @@ class SalesFlowTest extends TestCase
             ->assertViewHas('summary', fn ($summary) => $summary['wholesale']['revenue_cents'] === -14000 && $summary['wholesale']['refund_cents'] === 14000);
         $this->get('/sales/history?period=day&date='.$yesterday->toDateString())->assertOk()
             ->assertViewHas('summary', fn ($summary) => $summary['wholesale']['revenue_cents'] === 14000 && $summary['wholesale']['refund_cents'] === 0);
+    }
+
+    public function test_dashboard_ranks_monthly_customer_purchases_and_respects_history_permission(): void
+    {
+        $this->artisan('db:seed')->assertSuccessful();
+        $this->actingAs($this->owner());
+        $first = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 20, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $second = Product::create(['brand' => 'Nova Gás', 'weight_kg' => 6, 'quantity' => 20, 'purchase_price' => 70, 'reseller_price' => 100, 'unit_price' => 120]);
+        $currentMonth = now()->startOfMonth()->addDay();
+        $previousMonth = $currentMonth->copy()->subMonth();
+        $addSale = function (Product $product, string $channel, int $quantity, $date, bool $cancelled = false): ProductSale {
+            $order = SaleOrder::create(['channel' => $channel, 'sold_at' => $date, 'cancelled_at' => $cancelled ? $date : null]);
+            return ProductSale::create([
+                'sale_order_id' => $order->id, 'product_id' => $product->id,
+                'channel' => $channel, 'quantity' => $quantity,
+                'unit_price' => 160, 'unit_cost' => 100, 'sold_at' => $date,
+            ]);
+        };
+        $firstSale = $addSale($first, 'wholesale', 6, $currentMonth);
+        $addSale($first, 'unit', 3, $currentMonth);
+        $addSale($second, 'unit', 5, $currentMonth);
+        $addSale($second, 'unit', 20, $previousMonth);
+        $addSale($second, 'wholesale', 10, $currentMonth, true);
+        StockDamageEvent::create([
+            'product_id' => $first->id, 'product_sale_id' => $firstSale->id,
+            'kind' => 'refund', 'quantity' => 2, 'refund_cents' => 32000, 'reason' => 'Botijas avariadas',
+        ]);
+
+        $this->get('/dashboard?month='.$currentMonth->format('Y-m'))->assertOk()
+            ->assertSee('Botijas mais compradas')->assertSee('purchased-chart', false)
+            ->assertDontSee('Como é calculado')
+            ->assertViewHas('topPurchased', fn ($rows) => $rows->count() === 2
+                && $rows[0]['product']->id === $first->id && $rows[0]['wholesale'] === 4
+                && $rows[0]['unit'] === 3 && $rows[0]['total'] === 7
+                && $rows[1]['product']->id === $second->id && $rows[1]['total'] === 5);
+        $this->get('/dashboard?month='.$previousMonth->format('Y-m'))->assertOk()
+            ->assertViewHas('topPurchased', fn ($rows) => $rows->count() === 1
+                && $rows[0]['product']->id === $second->id && $rows[0]['total'] === 20);
+
+        $stockManager = User::create(['name' => 'Gestor de estoque', 'username' => 'gestorestoque', 'password' => 'password12345', 'is_active' => true]);
+        $stockManager->directPermissions()->attach(Permission::where('key', 'products.manage')->firstOrFail());
+        $this->actingAs($stockManager)->get('/dashboard')->assertOk()
+            ->assertViewHas('canViewSalesHistory', false)
+            ->assertDontSee('purchased-chart', false);
     }
 }

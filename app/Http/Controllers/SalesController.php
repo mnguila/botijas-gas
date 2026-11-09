@@ -427,38 +427,6 @@ class SalesController extends Controller
         return back()->with('success', 'Venda por unidade registada.');
     }
 
-    public function reportStandDamage(Request $request, InventoryBalances $balances)
-    {
-        $reason = $request->input('reason');
-        if (is_string($reason)) $request->merge(['reason' => trim($reason)]);
-        $data = $request->validate([
-            'product_id' => ['required', 'integer', 'exists:products,id'],
-            'location_id' => ['required', 'integer', 'exists:locations,id'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:1000000000'],
-            'reason' => ['required', 'string', 'max:500'],
-        ]);
-        $point = $request->user()->is_super_admin ? null : $request->user()->salesLocation;
-        abort_if($point && $point->id !== (int) $data['location_id'], 403);
-
-        DB::transaction(function () use ($data, $request, $balances) {
-            $product = $balances->lockProduct((int) $data['product_id']);
-            $stand = Location::whereKey($data['location_id'])->where('kind', 'physical')->where('is_sales_point', true)->first();
-            if (! $stand) throw ValidationException::withMessages(['location_id' => 'Escolha uma banca válida.']);
-            $stock = ProductStandStock::where('product_id', $product->id)->where('location_id', $stand->id)->first();
-            if (! $stock || $stock->available_quantity < $data['quantity']) {
-                throw ValidationException::withMessages(['quantity' => 'Não há botijas disponíveis suficientes nesta banca.']);
-            }
-            $stock->increment('damaged_quantity', $data['quantity']);
-            StockDamageEvent::create([
-                'product_id' => $product->id, 'location_id' => $stand->id,
-                'kind' => 'detected', 'quantity' => $data['quantity'], 'reason' => $data['reason'],
-                'created_by_user_id' => $request->user()->id,
-            ]);
-        });
-
-        return back()->with('success', 'Avaria registada. As botijas não podem ser vendidas.');
-    }
-
     public function returnDamaged(Request $request, ProductSale $sale, InventoryBalances $balances)
     {
         $this->authorizeSalePoint($request, $sale->order);

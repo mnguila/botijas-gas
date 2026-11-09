@@ -34,11 +34,15 @@ class AllocationRequestController extends Controller
             });
         }
 
+        $statusCounts = (clone $query)->selectRaw('status, COUNT(*) as total')
+            ->groupBy('status')->pluck('total', 'status');
+
         return view('allocations.requests', [
             'requests' => $query->latest('id')->paginate(25),
             'products' => Product::orderBy('brand')->orderBy('weight_kg')->get()->filter(fn (Product $product) => $product->isReadyForSale()),
             'stands' => Location::where('is_sales_point', true)->where('kind', 'physical')->where('is_active', true)->orderBy('name')->get(),
             'assignedPoint' => $point,
+            'statusCounts' => $statusCounts,
         ]);
     }
 

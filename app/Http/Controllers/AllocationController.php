@@ -24,12 +24,12 @@ class AllocationController extends Controller
         $centralStock = $products->mapWithKeys(fn (Product $product) => [$product->id => $balances->centralQuantity($product)]);
         $centralDamaged = $products->mapWithKeys(fn (Product $product) => [$product->id => $product->damaged_quantity]);
         $inTransitStock = $products->mapWithKeys(fn (Product $product) => [$product->id => $balances->inTransitQuantity($product)]);
-        $centralTotal = $centralStock->sum() + $centralDamaged->sum();
+        $centralTotal = $centralStock->sum();
         $inTransitTotal = $inTransitStock->sum();
         $standTotals = $stands->mapWithKeys(fn (Location $stand) => [
-            $stand->id => $products->sum(fn (Product $product) => (int) ($standStock->get($product->id)?->get($stand->id) ?? 0)),
+            $stand->id => $products->sum(fn (Product $product) => (int) ($standStock->get($product->id)?->get($stand->id) ?? 0) - (int) ($standDamaged->get($product->id)?->get($stand->id) ?? 0)),
         ]);
-        $overallTotal = $products->sum('quantity');
+        $overallTotal = $products->sum('quantity') - $centralDamaged->sum() - $products->sum(fn (Product $product) => $standDamaged->get($product->id)?->sum() ?? 0);
         $allocations = ProductAllocation::with(['product', 'location', 'createdBy'])->latest('id')->paginate(30);
 
         return view('allocations.index', compact('products', 'allocatableProducts', 'stands', 'activeStands', 'standStock', 'standDamaged', 'centralStock', 'centralDamaged', 'inTransitStock', 'centralTotal', 'inTransitTotal', 'standTotals', 'overallTotal', 'allocations'));

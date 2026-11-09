@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ProductStockEntry;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -58,6 +59,19 @@ class CatalogAndAccessTest extends TestCase
         $this->post('/locations', ['name' => 'Banca 1'])->assertSessionHas('success');
         $this->assertDatabaseHas('locations', ['name' => 'Banca 1', 'kind' => 'physical', 'plate' => null, 'is_sales_point' => true]);
         $this->assertSame(1, Location::count());
+    }
+
+    public function test_products_page_keeps_orphaned_stock_history_visible_without_failing(): void
+    {
+        $this->actingAs($this->owner());
+        DB::statement('PRAGMA defer_foreign_keys = ON');
+        ProductStockEntry::create([
+            'product_id' => 999999, 'quantity_added' => 2,
+            'quantity_before' => 0, 'quantity_after' => 2,
+            'source' => 'opening', 'note' => 'Saldo histórico',
+        ]);
+
+        $this->get('/products')->assertOk()->assertSee('Produto removido #999999')->assertSee('Saldo histórico');
     }
 
     public function test_sales_location_can_be_renamed_deactivated_and_reactivated_without_losing_stock(): void
@@ -142,7 +156,7 @@ class CatalogAndAccessTest extends TestCase
         $this->assertDatabaseHas('locations', ['id' => $vehicle->id, 'kind' => 'vehicle']);
     }
 
-    public function test_product_can_be_edited_archived_and_restored_with_history_preserved(): void
+    public function test_product_with_stock_entry_history_cannot_be_archived(): void
     {
         $this->actingAs($this->owner());
         $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 50, 'purchase_price' => 680, 'reseller_price' => 750, 'unit_price' => 790]);
@@ -156,17 +170,18 @@ class CatalogAndAccessTest extends TestCase
         $this->assertDatabaseHas('product_stock_entries', ['product_id' => $product->id, 'quantity_added' => 15, 'quantity_before' => 50, 'quantity_after' => 65, 'note' => 'Fornecedor']);
         $this->assertDatabaseHas('product_stock_entries', ['product_id' => $product->id, 'quantity_added' => 5, 'quantity_before' => 65, 'quantity_after' => 70]);
 
-        $this->delete("/products/{$product->id}")->assertSessionHas('success');
-        $this->assertSoftDeleted('products', ['id' => $product->id]);
-        $this->assertSame(0, Product::count());
-        $this->get('/products')->assertOk()->assertSee('Histórico de produtos apagados')->assertSee('Botija 9Kg · Petro Gas')->assertSee('Botija para uso doméstico')->assertSee('Restaurar');
-        $this->assertSame($product->id, ProductStockEntry::firstOrFail()->product->id);
-        $this->post("/products/{$product->id}/stock", ['quantity_added' => 1])->assertNotFound();
-        $this->post('/products', ['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 1, 'purchase_price' => 690, 'reseller_price' => 760, 'unit_price' => 800])->assertSessionHasErrors('brand');
-
-        $this->patch("/products/{$product->id}/restore")->assertSessionHas('success');
+        $this->delete("/products/{$product->id}")->assertSessionHasErrors('product');
         $this->assertNotSoftDeleted('products', ['id' => $product->id]);
-        $this->assertSame(70, $product->fresh()->quantity);
+        $this->get('/products')->assertOk()->assertSee('Não pode apagar')->assertSee('Botija 9Kg · Petro Gas')->assertSee('Botija para uso doméstico');
+        $this->assertSame($product->id, ProductStockEntry::firstOrFail()->product->id);
+        $this->post('/products', ['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 1, 'purchase_price' => 690, 'reseller_price' => 760, 'unit_price' => 800])->assertSessionHasErrors('brand');
+        $stockWithoutHistory = Product::create(['brand' => 'Com saldo', 'weight_kg' => 11, 'quantity' => 1, 'purchase_price' => 100, 'reseller_price' => 120, 'unit_price' => 130]);
+        $this->delete("/products/{$stockWithoutHistory->id}")->assertSessionHasErrors('product');
+        $empty = Product::create(['brand' => 'Sem estoque', 'weight_kg' => 6, 'quantity' => 0, 'purchase_price' => 100, 'reseller_price' => 120, 'unit_price' => 130]);
+        $this->delete("/products/{$empty->id}")->assertSessionHas('success');
+        $this->assertSoftDeleted('products', ['id' => $empty->id]);
+        $this->patch("/products/{$empty->id}/restore")->assertSessionHas('success');
+        $this->assertNotSoftDeleted('products', ['id' => $empty->id]);
     }
 
     public function test_group_and_user_registration_control_access(): void

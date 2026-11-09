@@ -5,7 +5,7 @@
 <h2 class="page-title">Editar produto</h2>
 <p class="page-subtitle">{{ $product->label }}</p>
 <section class="panel">
-    <p class="muted">Quantidade atual: <strong>{{ number_format($product->quantity, 0, ',', '.') }}</strong>. Para aumentar o estoque, use “Adicionar estoque” na página Produtos.</p>
+    <p class="muted">Quantidade atual: <strong>{{ number_format($product->quantity, 0, ',', '.') }}</strong> botijas físicas (inclui avariadas). Para aumentar o estoque, use “Adicionar estoque” na página Produtos.</p>
     <form method="post" action="{{ route('products.update', $product) }}">@csrf @method('PATCH')
         <div class="fields three">
             <label>Marca<input name="brand" maxlength="100" value="{{ old('brand', $product->brand) }}" required></label>
