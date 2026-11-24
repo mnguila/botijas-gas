@@ -39,13 +39,12 @@
     </form>
     <p class="muted">{{ number_format($users->total(), 0, ',', '.') }} {{ $users->total() === 1 ? 'utilizador encontrado' : 'utilizadores encontrados' }}@if($search !== '') para “{{ $search }}”@endif</p>
     <div class="tablewrap"><table>
-        <thead><tr><th>Nome</th><th>Username</th><th>Estado</th><th>Grupos</th><th>Permissões individuais</th><th>Ação</th></tr></thead>
+        <thead><tr><th>Nome</th><th>Username</th><th>Estado</th><th>Grupos</th><th>Ação</th></tr></thead>
         <tbody>@forelse($users as $user)<tr>
             <td><strong>{{ $user->name }}</strong>@if($user->is_super_admin) <span class="pill">Administrador principal</span>@endif</td>
             <td>{{ $user->username }}</td>
             <td>{{ $user->is_active ? 'Ativo' : 'Inativo' }}</td>
             <td>{{ $user->groups->pluck('name')->join(', ') ?: '—' }}</td>
-            <td>{{ $user->directPermissions->pluck('label')->join(', ') ?: '—' }}</td>
             <td>@if($grantScope->canManageUser(auth()->user(), $user))<a class="small-link" href="{{ route('access.users.edit', $user) }}">Editar</a>@endif</td>
         </tr>@empty<tr><td colspan="6" class="muted">{{ $search !== '' ? 'Nenhum utilizador corresponde à pesquisa.' : 'Ainda não há utilizadores.' }}</td></tr>@endforelse</tbody>
     </table></div>

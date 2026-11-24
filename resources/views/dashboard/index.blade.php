@@ -41,27 +41,8 @@
 @if($unpricedCount > 0)
     <div class="dashboard-warning" role="note">
         <strong>{{ $unpricedCount }} {{ $unpricedCount === 1 ? 'produto tem' : 'produtos têm' }} botijas sem custo do fornecedor.</strong>
-        <span>Preencha o custo na página Produtos para que o investimento total reflita essas unidades.</span>
+        <span>Preencha o custo na página Produtos para que o investimento total reflite essas unidades.</span>
     </div>
-@endif
-
-@if($canViewSalesProfit)
-<section class="dashboard-profit-section" aria-labelledby="dashboard-profit-title">
-    <div class="dashboard-panel-heading"><div><span class="dashboard-kicker">Projeção</span><h3 id="dashboard-profit-title">Lucro potencial do estoque</h3></div><span class="dashboard-hint">{{ number_format($projectedUnits, 0, ',', '.') }} botijas com preços completos</span></div>
-    <div class="dashboard-profit-grid">
-        <div class="dashboard-profit-card">
-            <span>Ao preço de revendedor</span>
-            <strong>{{ number_format($resellerProfitCents / 100, 2, ',', '.') }} <small>MT</small></strong>
-            <p>Se todas as {{ number_format($projectedUnits, 0, ',', '.') }} botijas forem vendidas a revendedor.</p>
-        </div>
-        <div class="dashboard-profit-card dashboard-profit-card-unit">
-            <span>Ao preço por unidade</span>
-            <strong>{{ number_format($unitProfitCents / 100, 2, ',', '.') }} <small>MT</small></strong>
-            <p>Se as mesmas botijas forem vendidas por unidade.</p>
-        </div>
-    </div>
-    <p class="muted">Cada valor é um cenário separado: (preço de venda − custo do fornecedor) × botijas disponíveis. Avariadas, em trânsito e produtos sem preços completos ficam fora da projeção.</p>
-</section>
 @endif
 
 <div class="dashboard-grid">

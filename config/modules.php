@@ -81,20 +81,4 @@ return [
             ],
         ],
     ],
-    'aduaneiros' => [
-        'name' => 'Processos Aduaneiros',
-        'description' => 'Entradas, importadores, etapas, comunicações e anexos.',
-        'icon' => 'i-file',
-        'entry_routes' => [
-            ['permission' => 'customs.manage', 'route' => 'customs.index'],
-        ],
-        'menu' => [
-            [
-                'label' => 'PROCESSOS ADUANEIROS',
-                'items' => [
-                    ['label' => 'Processos', 'route' => 'customs.index', 'active' => 'customs.*', 'permission' => 'customs.manage', 'icon' => 'i-file'],
-                ],
-            ],
-        ],
-    ],
 ];

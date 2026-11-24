@@ -17,11 +17,9 @@ return [
         'expenses.approve' => 'Aprovar, rejeitar e anular despesas operacionais',
         'expenses.view' => 'Consultar despesas operacionais e relatórios',
         'customers.manage' => 'Gerir clientes',
-        'customs.manage' => 'Gerir processos aduaneiros e anexos',
         'access.manage' => 'Gerir utilizadores e grupos',
         'access.grant.botijas' => 'Atribuir acessos do módulo Vendas de botijas',
         'access.grant.clientes' => 'Atribuir acessos do módulo Gestão de Clientes',
-        'access.grant.aduaneiros' => 'Atribuir acessos do módulo Processos Aduaneiros',
         'access.grant.acessos' => 'Atribuir acessos do módulo Gestão de acessos',
     ],
     'modules' => [
@@ -32,10 +30,6 @@ return [
         'clientes' => [
             'name' => 'Gestão de Clientes', 'grant' => 'access.grant.clientes',
             'permissions' => ['customers.manage'],
-        ],
-        'aduaneiros' => [
-            'name' => 'Processos Aduaneiros', 'grant' => 'access.grant.aduaneiros',
-            'permissions' => ['customs.manage'],
         ],
         'acessos' => [
             'name' => 'Gestão de acessos', 'grant' => 'access.grant.acessos',

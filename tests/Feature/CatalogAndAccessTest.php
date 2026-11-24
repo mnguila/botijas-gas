@@ -255,22 +255,22 @@ class CatalogAndAccessTest extends TestCase
         $access = Permission::where('key', 'access.manage')->firstOrFail();
         $botijasGrant = Permission::where('key', 'access.grant.botijas')->firstOrFail();
         $sales = Permission::where('key', 'sales.create')->firstOrFail();
-        $customs = Permission::where('key', 'customs.manage')->firstOrFail();
+        $customers = Permission::where('key', 'customers.manage')->firstOrFail();
         $manager = User::create(['name' => 'Gestor de acessos', 'username' => 'gestor-acessos', 'password' => 'password12345', 'is_active' => true]);
         $manager->directPermissions()->attach([$access->id, $botijasGrant->id]);
         $target = User::create(['name' => 'Operador', 'username' => 'operador', 'password' => 'password12345', 'is_active' => true]);
-        $protected = User::create(['name' => 'Despachante', 'username' => 'despachante', 'password' => 'password12345', 'is_active' => true]);
-        $protected->directPermissions()->attach($customs);
+        $protected = User::create(['name' => 'Gestor de clientes', 'username' => 'gestor-clientes', 'password' => 'password12345', 'is_active' => true]);
+        $protected->directPermissions()->attach($customers);
 
         $this->actingAs($manager);
         $this->get('/access/users')->assertOk()->assertSee('Registar vendas a grosso e por unidade')
-            ->assertViewHas('permissions', fn ($permissions) => $permissions->contains('id', $sales->id) && ! $permissions->contains('id', $customs->id));
+            ->assertViewHas('permissions', fn ($permissions) => $permissions->contains('id', $sales->id) && ! $permissions->contains('id', $customers->id));
         $this->post('/access/users', [
             'name' => 'Novo', 'username' => 'novo', 'password' => 'password12345',
             'password_confirmation' => 'password12345', 'is_active' => 1,
-            'permissions' => [$customs->id],
+            'permissions' => [$customers->id],
         ])->assertSessionHasErrors('permissions.0');
-        $this->post('/access/groups', ['name' => 'Aduana', 'permissions' => [$customs->id]])
+        $this->post('/access/groups', ['name' => 'Clientes', 'permissions' => [$customers->id]])
             ->assertSessionHasErrors('permissions.0');
         $this->patch(route('access.users.update', $target), [
             'name' => $target->name, 'username' => $target->username, 'is_active' => 1,
@@ -308,6 +308,7 @@ class CatalogAndAccessTest extends TestCase
         $this->actingAs($owner);
         $this->get('/modules')->assertOk()->assertSee('Vendas de botijas')
             ->assertSee('Gestão de acessos')
+            ->assertDontSee('Processos Aduaneiros')
             ->assertSee('href="'.route('dashboard.index').'"', false)
             ->assertSee('href="'.route('access.users').'"', false)
             ->assertSee('MÓDULO 01')->assertSee('MÓDULO 02');
@@ -350,6 +351,20 @@ class CatalogAndAccessTest extends TestCase
         $this->actingAs($withoutAccess);
         $this->get('/modules')->assertOk()->assertSee('Sem acesso atribuído')->assertDontSee('Abrir módulo');
         $this->get('/sales')->assertForbidden();
+    }
+
+    public function test_customs_module_is_removed_without_dropping_historical_tables(): void
+    {
+        $this->artisan('db:seed')->assertSuccessful();
+        $this->actingAs($this->owner());
+
+        $this->get('/modules')->assertOk()->assertDontSee('Processos Aduaneiros');
+        $this->get('/access/groups')->assertOk()->assertDontSee('Processos Aduaneiros');
+        $this->get('/customs-processes')->assertNotFound();
+        $this->post('/customs-processes', [])->assertNotFound();
+        $this->assertDatabaseMissing('permissions', ['key' => 'customs.manage']);
+        $this->assertDatabaseMissing('permissions', ['key' => 'access.grant.aduaneiros']);
+        $this->assertTrue(Schema::hasTable('customs_processes'));
     }
 
     public function test_sales_profit_is_visible_only_with_individual_permission(): void
