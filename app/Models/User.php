@@ -84,4 +84,9 @@ class User extends Authenticatable
 
         return $this->directPermissions()->where('key', 'sales.profit.view')->exists();
     }
+
+    public function canRegisterSales(): bool
+    {
+        return $this->hasPermission('sales.wholesale.create') || $this->hasPermission('sales.unit.create');
+    }
 }

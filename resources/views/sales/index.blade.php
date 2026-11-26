@@ -6,7 +6,8 @@
     @if(auth()->user()->hasPermission('allocations.manage'))<a class="small-link" href="{{ route('allocations.index') }}">Alocar às bancas →</a>@endif
 </div>
 
-<div class="sales-summary">
+<div class="sales-summary {{ $canWholesale && $canUnit ? '' : 'sales-summary-limited' }}">
+    @if($canWholesale)
     <div class="sales-summary-card">
         <span>Grosso · hoje</span>
         <strong>{{ number_format($metrics['wholesale']['today_revenue_cents'] / 100, 2, ',', '.') }} MT</strong>
@@ -17,6 +18,8 @@
         </small>
         @if($metrics['wholesale']['today_refund_cents'] > 0)<small>Reembolsos hoje: {{ number_format($metrics['wholesale']['today_refund_cents'] / 100, 2, ',', '.') }} MT</small>@endif
     </div>
+    @endif
+    @if($canUnit)
     <div class="sales-summary-card">
         <span>Unidade · hoje</span>
         <strong>{{ number_format($metrics['unit']['today_revenue_cents'] / 100, 2, ',', '.') }} MT</strong>
@@ -27,12 +30,13 @@
         </small>
         @if($metrics['unit']['today_refund_cents'] > 0)<small>Reembolsos hoje: {{ number_format($metrics['unit']['today_refund_cents'] / 100, 2, ',', '.') }} MT</small>@endif
     </div>
+    @endif
     <div class="sales-summary-card">
         <span>Vendas acumuladas · hoje</span>
-        <strong>{{ number_format(($metrics['wholesale']['today_revenue_cents'] + $metrics['unit']['today_revenue_cents']) / 100, 2, ',', '.') }} MT</strong>
+        <strong>{{ number_format((($canWholesale ? $metrics['wholesale']['today_revenue_cents'] : 0) + ($canUnit ? $metrics['unit']['today_revenue_cents'] : 0)) / 100, 2, ',', '.') }} MT</strong>
         <small>{{ $assignedPoint?->name ?? 'Todos os locais' }}</small>
         @if($canViewSalesProfit)
-            <small>Margem do dia {{ number_format(($metrics['wholesale']['today_margin_cents'] + $metrics['unit']['today_margin_cents']) / 100, 2, ',', '.') }} MT</small>
+            <small>Margem do dia {{ number_format((($canWholesale ? $metrics['wholesale']['today_margin_cents'] : 0) + ($canUnit ? $metrics['unit']['today_margin_cents'] : 0)) / 100, 2, ',', '.') }} MT</small>
         @endif
     </div>
 </div>
@@ -69,7 +73,7 @@
     <p class="muted">Ainda não há produtos disponíveis para venda. Defina o custo do fornecedor e os preços de revendedor e por unidade em Produtos.</p>
 @endif
 
-<div class="operation-grid">
+<div class="operation-grid {{ $canWholesale && $canUnit ? '' : 'operation-grid-single' }}">
     @if($canWholesale)
     <section class="panel operation-panel">
         <span class="operation-label">01 · Camiões</span><h2>Venda a grosso</h2>
@@ -85,7 +89,7 @@
             <div class="sale-items" data-sale-items>
                 @foreach(old('form_type') === 'wholesale' ? old('items', [['product_id' => '', 'quantity' => '']]) : [['product_id' => '', 'quantity' => '']] as $index => $item)
                 <div class="sale-item-row" data-sale-item>
-                    <label>Produto<select name="items[{{ $index }}][product_id]" data-item-product required>@foreach($sellableProducts as $product)<option value="{{ $product->id }}" data-price="{{ $product->reseller_price }}" @selected(($item['product_id'] ?? '') == $product->id)>{{ $product->label }}  · {{ number_format($product->reseller_price, 2, ',', '.') }} MT</option>@endforeach</select></label>
+                    <div class="sale-product-field"><span>Produto</span><select name="items[{{ $index }}][product_id]" data-item-product aria-label="Produto da venda a grosso" required><option value="">Selecione um produto</option>@foreach($sellableProducts as $product)<option value="{{ $product->id }}" data-price="{{ $product->reseller_price }}" @selected(($item['product_id'] ?? '') == $product->id)>{{ $product->label }} · {{ number_format($product->reseller_price, 2, ',', '.') }} MT</option>@endforeach</select></div>
                     <label>Quantidade<input type="number" name="items[{{ $index }}][quantity]" data-item-quantity min="1" max="1000000000" value="{{ $item['quantity'] ?? '' }}" required></label>
                     <button type="button" class="item-remove" data-remove-item aria-label="Remover item">×</button>
                 </div>
@@ -115,7 +119,7 @@
             <div class="sale-items" data-sale-items>
                 @foreach(old('form_type') === 'unit' ? old('items', [['product_id' => '', 'quantity' => '']]) : [['product_id' => '', 'quantity' => '']] as $index => $item)
                 <div class="sale-item-row" data-sale-item>
-                    <label>Produto<select name="items[{{ $index }}][product_id]" data-item-product required>@foreach($sellableProducts as $product)<option value="{{ $product->id }}" data-price="{{ $product->unit_price }}" @selected(($item['product_id'] ?? '') == $product->id)>{{ $product->label }} · {{ number_format($product->unit_price, 2, ',', '.') }} MT</option>@endforeach</select></label>
+                    <div class="sale-product-field"><span>Produto</span><select name="items[{{ $index }}][product_id]" data-item-product aria-label="Produto da venda por unidade" required><option value="">Selecione um produto</option>@foreach($sellableProducts as $product)<option value="{{ $product->id }}" data-price="{{ $product->unit_price }}" @selected(($item['product_id'] ?? '') == $product->id)>{{ $product->label }} · {{ number_format($product->unit_price, 2, ',', '.') }} MT</option>@endforeach</select></div>
                     <label>Quantidade<input type="number" name="items[{{ $index }}][quantity]" data-item-quantity min="1" max="1000000000" value="{{ $item['quantity'] ?? '' }}" required></label>
                     <button type="button" class="item-remove" data-remove-item aria-label="Remover item">×</button>
                 </div>
@@ -198,7 +202,7 @@
             <td><div class="sale-lines">@foreach($order->items as $item)<div><strong>{{ $item->product->label }}</strong><small>{{ number_format($item->quantity - $item->refunded_quantity, 0, ',', '.') }} × {{ number_format($item->unit_price, 2, ',', '.') }} MT</small>
                 @if($item->refunded_quantity > 0)<small>{{ number_format($item->refunded_quantity, 0, ',', '.') }} reembolsadas</small>@endif
                 @foreach($item->damageEvents as $event)<small>{{ $event->kind === 'exchange' ? 'Troca' : 'Reembolso' }} de {{ $event->quantity }} · {{ $event->reason }}</small>@endforeach
-                @if(!$order->cancelled_at && $item->quantity > $item->refunded_quantity)<button type="button" class="smallbtn" data-damaged-return data-return-url="{{ route('sales.return', $item) }}" data-return-product="{{ $item->product->label }}" data-return-max="{{ $item->quantity - $item->refunded_quantity }}">Troca / reembolso</button>@endif
+                @if(!$order->cancelled_at && $item->quantity > $item->refunded_quantity && ($order->channel === 'wholesale' ? $canWholesale : $canUnit))<button type="button" class="smallbtn" data-damaged-return data-return-url="{{ route('sales.return', $item) }}" data-return-product="{{ $item->product->label }}" data-return-max="{{ $item->quantity - $item->refunded_quantity }}">Troca / reembolso</button>@endif
             </div>@endforeach</div></td>
             <td>@if($order->channel === 'wholesale'){{ $order->truck_plate }} · {{ $order->driver_name }}@else{{ $order->location?->name ?? '—' }}@endif</td>
             <td class="num">{{ number_format($orderQuantity, 0, ',', '.') }}</td>
@@ -218,6 +222,84 @@ document.querySelectorAll('[data-sale-items]').forEach(list => {
     const count = form.querySelector('[data-sale-item-count]');
     const total = form.querySelector('[data-sale-total]');
     const rows = () => [...list.querySelectorAll('[data-sale-item]')];
+    let searchIndex = 0;
+    const setupProductSearch = row => {
+        const field = row.querySelector('.sale-product-field');
+        const select = row.querySelector('[data-item-product]');
+        const search = document.createElement('input');
+        const results = document.createElement('div');
+        const listId = `sale-product-options-${form.querySelector('[name="form_type"]').value}-${searchIndex++}`;
+        search.type = 'search';
+        search.placeholder = 'Escreva o nome do produto';
+        search.autocomplete = 'off';
+        search.required = true;
+        search.setAttribute('aria-label', 'Pesquisar produto');
+        search.setAttribute('role', 'combobox');
+        search.setAttribute('aria-autocomplete', 'list');
+        search.setAttribute('aria-controls', listId);
+        search.setAttribute('aria-expanded', 'false');
+        results.id = listId;
+        results.className = 'sale-product-results';
+        results.setAttribute('role', 'listbox');
+        results.hidden = true;
+        field.append(search, results);
+        select.hidden = true;
+        select.required = false;
+        if (select.value) search.value = select.selectedOptions[0].textContent.trim();
+        search.setCustomValidity(select.value ? '' : 'Selecione um produto da lista.');
+
+        const close = () => { results.hidden = true; search.setAttribute('aria-expanded', 'false'); };
+        const show = () => {
+            const query = search.value.trim().toLocaleLowerCase('pt');
+            const used = new Set(rows().filter(other => other !== row).map(other => other.querySelector('[data-item-product]').value));
+            const matches = [...select.options].filter(option => option.value && !used.has(option.value) && option.textContent.toLocaleLowerCase('pt').includes(query));
+            results.replaceChildren();
+            if (matches.length === 0) {
+                const empty = document.createElement('span');
+                empty.className = 'sale-product-empty';
+                empty.textContent = 'Nenhum produto encontrado';
+                results.append(empty);
+            }
+            matches.forEach(option => {
+                const choice = document.createElement('button');
+                choice.type = 'button';
+                choice.setAttribute('role', 'option');
+                choice.textContent = option.textContent.trim();
+                choice.addEventListener('mousedown', event => event.preventDefault());
+                choice.addEventListener('click', () => {
+                    select.value = option.value;
+                    search.value = option.textContent.trim();
+                    search.setCustomValidity('');
+                    close();
+                    refresh();
+                    row.querySelector('[data-item-quantity]').focus();
+                });
+                results.append(choice);
+            });
+            results.hidden = false;
+            search.setAttribute('aria-expanded', 'true');
+        };
+        search.addEventListener('focus', show);
+        search.addEventListener('input', () => { select.value = ''; search.setCustomValidity('Selecione um produto da lista.'); show(); refresh(); });
+        search.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { close(); return; }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (results.hidden) show();
+                const choices = [...results.querySelectorAll('button')];
+                if (!choices.length) return;
+                const current = choices.findIndex(choice => choice.classList.contains('active'));
+                choices.forEach(choice => choice.classList.remove('active'));
+                choices[(current + (event.key === 'ArrowDown' ? 1 : choices.length - 1)) % choices.length].classList.add('active');
+            }
+            if (event.key === 'Enter' && !results.hidden) {
+                const choice = results.querySelector('button.active') || results.querySelector('button');
+                if (choice) { event.preventDefault(); choice.click(); }
+            }
+        });
+        field.addEventListener('focusout', () => { setTimeout(() => { if (!field.contains(document.activeElement)) close(); }, 0); });
+        document.addEventListener('click', event => { if (!field.contains(event.target)) close(); });
+    };
     const refresh = () => {
         let amount = 0;
         rows().forEach((row, index) => {
@@ -228,24 +310,26 @@ document.querySelectorAll('[data-sale-items]').forEach(list => {
             const quantity = Number(row.querySelector('[data-item-quantity]').value || 0);
             amount += price * quantity;
         });
-        add.disabled = rows().length >= Math.min(20, rows()[0].querySelector('[data-item-product]').options.length);
+        add.disabled = rows().length >= Math.min(20, rows()[0].querySelector('[data-item-product]').options.length - 1);
         count.textContent = rows().length === 1 ? '1 produto nesta venda' : `${rows().length} produtos nesta venda`;
         total.textContent = new Intl.NumberFormat('pt-MZ', {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount) + ' MT';
     };
     add.addEventListener('click', () => {
         if (add.disabled) return;
-        const selected = new Set(rows().map(existing => existing.querySelector('[data-item-product]').value));
         const row = rows()[0].cloneNode(true);
-        const nextProduct = [...row.querySelector('[data-item-product]').options].find(option => !selected.has(option.value));
-        row.querySelector('[data-item-product]').value = nextProduct?.value || '';
+        row.querySelector('.sale-product-field input')?.remove();
+        row.querySelector('.sale-product-results')?.remove();
+        row.querySelector('[data-item-product]').value = '';
         row.querySelector('[data-item-quantity]').value = '';
         list.appendChild(row);
+        setupProductSearch(row);
         refresh();
-        row.querySelector('[data-item-product]').focus();
+        row.querySelector('.sale-product-field input').focus();
     });
     list.addEventListener('click', event => { if (event.target.closest('[data-remove-item]') && rows().length > 1) { event.target.closest('[data-sale-item]').remove(); refresh(); } });
     list.addEventListener('input', refresh);
     list.addEventListener('change', refresh);
+    rows().forEach(setupProductSearch);
     refresh();
 });
 

@@ -58,7 +58,7 @@ class DashboardController extends Controller
         $unpricedCount = $products->filter(fn (Product $product) => $product->quantity > 0 && (float) $product->purchase_price <= 0)->count();
         $topRows = $rows->filter(fn (array $row) => $row['investment_cents'] > 0)->take(6);
         $highestInvestmentCents = $topRows->max('investment_cents') ?? 0;
-        $salesMetrics = auth()->user()->hasPermission('sales.create') ? $salesMetrics->build(auth()->user()) : null;
+        $salesMetrics = auth()->user()->canRegisterSales() ? $salesMetrics->build(auth()->user()) : null;
 
         return view('dashboard.index', compact(
             'rows', 'totalInvestmentCents', 'damagedInvestmentCents', 'damagedUnits', 'resellerProfitCents', 'unitProfitCents', 'projectedUnits', 'totalUnits', 'productCount', 'productsWithStock', 'unpricedCount', 'topRows', 'highestInvestmentCents', 'salesMetrics', 'canViewSalesProfit', 'canViewSalesHistory', 'month', 'topPurchased', 'highestPurchased'

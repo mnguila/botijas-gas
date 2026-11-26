@@ -5,7 +5,7 @@
     <span class="section-eyebrow">Vendas de botijas</span>
     <h2 class="page-title">Histórico geral de vendas</h2>
     <p class="page-subtitle">Consulte vendas e reembolsos por dia, semana, mês e posto de venda.</p>
-</div>@if(auth()->user()->hasPermission('sales.create'))<a class="small-link" href="{{ route('sales.index') }}">← Voltar às vendas</a>@endif</div>
+</div>@if(auth()->user()->canRegisterSales())<a class="small-link" href="{{ route('sales.index') }}">← Voltar às vendas</a>@endif</div>
 
 <section class="panel sales-history-filter">
     <form method="get" action="{{ route('sales.history') }}">

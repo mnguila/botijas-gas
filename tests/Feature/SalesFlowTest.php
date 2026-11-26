@@ -30,6 +30,45 @@ class SalesFlowTest extends TestCase
         return $user;
     }
 
+    public function test_sales_permissions_limit_each_form_route_and_existing_sale_actions(): void
+    {
+        $this->artisan('db:seed')->assertSuccessful();
+        $unitPermission = Permission::where('key', 'sales.unit.create')->firstOrFail();
+        $wholesalePermission = Permission::where('key', 'sales.wholesale.create')->firstOrFail();
+        $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 10, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
+        $stand = Location::create(['name' => 'Banca Centro', 'kind' => 'physical', 'is_sales_point' => true]);
+        $this->actingAs($this->owner());
+        $this->post('/allocations', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 3])->assertSessionHas('success');
+
+        $seller = User::create(['name' => 'Vendedor', 'username' => 'vendedor', 'password' => 'password12345', 'is_active' => true]);
+        $seller->directPermissions()->attach($unitPermission);
+        $this->actingAs($seller);
+        $this->get('/modules')->assertSee('href="'.route('sales.index').'"', false);
+        $this->get('/sales')->assertOk()
+            ->assertSee('data-sale-confirm="Venda por unidade"', false)
+            ->assertDontSee('data-sale-confirm="Venda a grosso"', false)
+            ->assertDontSee('Estoque central · grosso');
+        $this->post('/sales/wholesale', ['product_id' => $product->id, 'quantity' => 1, 'truck_plate' => 'AAA-111', 'driver_name' => 'João'])->assertForbidden();
+        $this->post('/sales/unit', ['product_id' => $product->id, 'quantity' => 1, 'location_id' => $stand->id])->assertSessionHas('success');
+        $unitSale = ProductSale::latest('id')->firstOrFail();
+
+        $seller->directPermissions()->sync([$wholesalePermission->id]);
+        $this->get('/sales')->assertOk()
+            ->assertSee('data-sale-confirm="Venda a grosso"', false)
+            ->assertDontSee('data-sale-confirm="Venda por unidade"', false)
+            ->assertDontSee('Banca Centro · unidade');
+        $this->post('/sales/unit', ['product_id' => $product->id, 'quantity' => 1, 'location_id' => $stand->id])->assertForbidden();
+        $this->post('/sales/wholesale', ['product_id' => $product->id, 'quantity' => 1, 'truck_plate' => 'AAA-111', 'driver_name' => 'João'])->assertSessionHas('success');
+        $wholesaleSale = ProductSale::latest('id')->firstOrFail();
+        $this->post("/sales/{$unitSale->id}/cancel", ['cancellation_reason' => 'Teste'])->assertForbidden();
+        $this->post("/sales/{$unitSale->id}/return", ['quantity' => 1, 'reason' => 'Avaria'])->assertForbidden();
+        $this->get("/sales/{$wholesaleSale->id}/delivery-guide")->assertOk();
+
+        $seller->directPermissions()->sync([$unitPermission->id]);
+        $this->get("/sales/{$wholesaleSale->id}/delivery-guide")->assertForbidden();
+        $this->post("/sales/{$wholesaleSale->id}/cancel", ['cancellation_reason' => 'Teste'])->assertForbidden();
+    }
+
     public function test_product_without_both_sale_prices_stays_in_stock_but_cannot_be_allocated_or_sold(): void
     {
         $this->actingAs($this->owner());
@@ -149,7 +188,7 @@ class SalesFlowTest extends TestCase
         );
 
         $seller = User::create(['name' => 'Banca Norte', 'username' => 'norte', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $standA->id]);
-        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.unit.create')->firstOrFail());
         $this->actingAs($seller);
         $this->get('/sales')->assertOk()->assertSee('Banca Norte')->assertSee('Botija 6Kg · Galp')
             ->assertDontSee('Banca Sul')->assertDontSee('Estoque central · grosso')
@@ -163,7 +202,7 @@ class SalesFlowTest extends TestCase
         $north = Location::create(['name' => 'Banca Norte', 'kind' => 'physical', 'is_sales_point' => true]);
         $south = Location::create(['name' => 'Banca Sul', 'kind' => 'physical', 'is_sales_point' => true]);
         $seller = User::create(['name' => 'Vendedor Norte', 'username' => 'vendedor-norte', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $north->id]);
-        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.unit.create')->firstOrFail());
         $seller->directPermissions()->attach(Permission::where('key', 'sales.profit.view')->firstOrFail());
 
         foreach ([[$north, 2, now()], [$north, 4, now()->subDay()], [$south, 3, now()]] as [$location, $quantity, $soldAt]) {
@@ -209,14 +248,14 @@ class SalesFlowTest extends TestCase
     {
         $this->artisan('db:seed')->assertSuccessful();
         $owner = $this->owner();
-        $sales = Permission::where('key', 'sales.create')->firstOrFail();
+        $sales = Permission::where('key', 'sales.unit.create')->firstOrFail();
         $allocations = Permission::where('key', 'allocations.manage')->firstOrFail();
         $group = AccessGroup::create(['name' => 'Vendedores']);
         $seller = User::create(['name' => 'Vendedor', 'username' => 'vendedor', 'password' => 'vendedor12345', 'is_active' => true]);
         $seller->groups()->attach($group);
 
         $this->actingAs($owner);
-        $this->get("/access/groups/{$group->id}/edit")->assertOk()->assertSee('Registar vendas a grosso e por unidade');
+        $this->get("/access/groups/{$group->id}/edit")->assertOk()->assertSee('Registar vendas por unidade');
         $this->patch("/access/groups/{$group->id}", ['name' => 'Vendedores', 'permissions' => [$sales->id]])->assertSessionHas('success');
         $this->get("/access/users/{$seller->id}/edit")->assertOk()->assertSee('Alocar botijas às bancas');
         $this->patch("/access/users/{$seller->id}", ['name' => 'Vendedor', 'username' => 'vendedor', 'is_active' => 1, 'groups' => [$group->id], 'permissions' => [$allocations->id]])->assertSessionHas('success');
@@ -232,7 +271,7 @@ class SalesFlowTest extends TestCase
     {
         $this->artisan('db:seed')->assertSuccessful();
         $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 20, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
-        $salesPermission = Permission::where('key', 'sales.create')->firstOrFail();
+        $salesPermission = Permission::where('key', 'sales.wholesale.create')->firstOrFail();
         $historyPermission = Permission::where('key', 'sales.history.view')->firstOrFail();
         $groupA = AccessGroup::create(['name' => 'Equipa A']);
         $groupB = AccessGroup::create(['name' => 'Equipa B']);
@@ -481,11 +520,12 @@ class SalesFlowTest extends TestCase
         foreach ([$standOne, $standTwo] as $stand) {
             $this->post('/allocations', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 4])->assertSessionHas('success');
         }
-        $sales = Permission::where('key', 'sales.create')->firstOrFail();
+        $unitSales = Permission::where('key', 'sales.unit.create')->firstOrFail();
+        $wholesaleSales = Permission::where('key', 'sales.wholesale.create')->firstOrFail();
         $standSeller = User::create(['name' => 'Banca Um', 'username' => 'banca1', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $standOne->id]);
-        $standSeller->directPermissions()->attach($sales);
+        $standSeller->directPermissions()->attach($unitSales);
         $vehicleSeller = User::create(['name' => 'Motorista', 'username' => 'motorista', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $vehicle->id]);
-        $vehicleSeller->directPermissions()->attach($sales);
+        $vehicleSeller->directPermissions()->attach($wholesaleSales);
 
         $this->actingAs($standSeller);
         $this->get('/sales')->assertOk()->assertSee('Banca 1')->assertDontSee('Registar venda a grosso');
@@ -573,7 +613,7 @@ class SalesFlowTest extends TestCase
         $product = Product::create(['brand' => 'Petro Gas', 'weight_kg' => 9, 'quantity' => 10, 'purchase_price' => 100, 'reseller_price' => 140, 'unit_price' => 160]);
         $vehicle = Location::create(['name' => 'Carro A', 'kind' => 'vehicle', 'plate' => 'ABC-123-MP', 'is_sales_point' => true]);
         $otherVehicle = Location::create(['name' => 'Carro B', 'kind' => 'vehicle', 'plate' => 'DEF-456-MP', 'is_sales_point' => true]);
-        $salesPermission = Permission::where('key', 'sales.create')->firstOrFail();
+        $salesPermission = Permission::where('key', 'sales.wholesale.create')->firstOrFail();
         $driver = User::create(['name' => 'Motorista', 'username' => 'motorista', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $vehicle->id]);
         $driver->directPermissions()->attach($salesPermission);
         $otherDriver = User::create(['name' => 'Outro', 'username' => 'outro', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $otherVehicle->id]);
@@ -807,7 +847,7 @@ class SalesFlowTest extends TestCase
         ]);
 
         $seller = User::create(['name' => 'Vendedor', 'username' => 'vendedor', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $stand->id]);
-        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.unit.create')->firstOrFail());
         $this->actingAs($seller)->get('/damages')->assertOk()->assertDontSee('Confirmar troca');
         $this->post('/damages/replacements', $replace)->assertForbidden();
     }
@@ -908,7 +948,7 @@ class SalesFlowTest extends TestCase
             $this->post('/allocations', ['product_id' => $product->id, 'location_id' => $stand->id, 'quantity' => 3])->assertSessionHas('success');
         }
         $seller = User::create(['name' => 'Vendedor Centro', 'username' => 'centro', 'password' => 'password12345', 'is_active' => true, 'sales_location_id' => $ownStand->id]);
-        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.unit.create')->firstOrFail());
         $this->actingAs($seller);
 
         $this->post('/damages', ['product_id' => $product->id, 'location_id' => $otherStand->id, 'quantity' => 1, 'reason' => 'Fuga'])->assertForbidden();

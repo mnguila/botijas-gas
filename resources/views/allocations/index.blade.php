@@ -3,7 +3,7 @@
 @section('content')
 <div class="operations-heading">
     <div><span class="section-eyebrow">Distribuição</span><h2 class="page-title">Alocar botijas às bancas</h2><p class="page-subtitle">A alocação move botijas do estoque central para uma banca. O total de botijas permanece igual.</p></div>
-    @if(auth()->user()->hasPermission('sales.create'))<a class="small-link" href="{{ route('sales.index') }}">Ver vendas →</a>@endif
+    @if(auth()->user()->canRegisterSales())<a class="small-link" href="{{ route('sales.index') }}">Ver vendas →</a>@endif
 </div>
 @if(collect(['allocations.request', 'allocations.approve', 'allocations.dispatch', 'allocations.receive'])->contains(fn ($permission) => auth()->user()->hasPermission($permission)))<p><a class="small-link" href="{{ route('allocation-requests.index') }}">Pedidos, guia de saída e confirmação de entrega →</a></p>@endif
 

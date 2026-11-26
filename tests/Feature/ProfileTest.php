@@ -19,7 +19,7 @@ class ProfileTest extends TestCase
         $this->get('/profile')->assertRedirect('/login');
 
         $point = Location::create(['name' => 'Banca Centro', 'kind' => 'physical', 'is_sales_point' => true]);
-        $permission = Permission::create(['key' => 'sales.create', 'label' => 'Registar vendas']);
+        $permission = Permission::firstOrCreate(['key' => 'sales.unit.create'], ['label' => 'Registar vendas por unidade']);
         $group = AccessGroup::create(['name' => 'Vendedores']);
         $group->permissions()->attach($permission);
         $user = User::create([
@@ -30,7 +30,7 @@ class ProfileTest extends TestCase
 
         $this->actingAs($user);
         $this->get('/profile')->assertOk()->assertSee('Maria Vendedora')->assertSee('maria')
-            ->assertSee('Banca Centro')->assertSee('Vendedores')->assertSee('Registar vendas')
+            ->assertSee('Banca Centro')->assertSee('Vendedores')->assertSee('Registar vendas por unidade')
             ->assertSee('Guardar nova password');
         $this->get('/access/users')->assertForbidden();
 

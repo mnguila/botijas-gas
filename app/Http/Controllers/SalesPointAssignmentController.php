@@ -15,8 +15,8 @@ class SalesPointAssignmentController extends Controller
             'users' => User::with('salesLocation')->where('is_super_admin', false)
                 ->where(function ($query) {
                     $query->whereNotNull('sales_location_id')
-                        ->orWhereHas('directPermissions', fn ($permissions) => $permissions->where('key', 'sales.create'))
-                        ->orWhereHas('groups.permissions', fn ($permissions) => $permissions->where('key', 'sales.create'));
+                        ->orWhereHas('directPermissions', fn ($permissions) => $permissions->where('key', 'sales.unit.create'))
+                        ->orWhereHas('groups.permissions', fn ($permissions) => $permissions->where('key', 'sales.unit.create'));
                 })->orderBy('name')->get(),
             'salesPoints' => Location::where('is_sales_point', true)->where('kind', 'physical')->where('is_active', true)->orderBy('name')->get(),
         ]);
@@ -28,7 +28,7 @@ class SalesPointAssignmentController extends Controller
         $data = $request->validate([
             'sales_location_id' => ['nullable', Rule::exists('locations', 'id')->where('is_sales_point', true)->where('kind', 'physical')->where('is_active', true)],
         ]);
-        abort_if(! empty($data['sales_location_id']) && ! $user->hasPermission('sales.create'), 403);
+        abort_if(! empty($data['sales_location_id']) && ! $user->hasPermission('sales.unit.create'), 403);
 
         $user->update(['sales_location_id' => $data['sales_location_id'] ?? null]);
 

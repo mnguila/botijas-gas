@@ -45,6 +45,24 @@
     </div>
 @endif
 
+@if($canViewSalesProfit)
+<section class="dashboard-profit-section" aria-labelledby="dashboard-profit-title">
+    <h2 id="dashboard-profit-title">Lucro potencial do estoque</h2>
+    <div class="dashboard-profit-grid">
+        <div class="dashboard-profit-card">
+            <span>Ao preço de revendedor</span>
+            <strong>{{ number_format($resellerProfitCents / 100, 2, ',', '.') }} <small>MT</small></strong>
+            <p>Margem potencial das botijas disponíveis com preços completos.</p>
+        </div>
+        <div class="dashboard-profit-card dashboard-profit-card-unit">
+            <span>Ao preço por unidade</span>
+            <strong>{{ number_format($unitProfitCents / 100, 2, ',', '.') }} <small>MT</small></strong>
+            <p>Margem potencial das mesmas {{ number_format($projectedUnits, 0, ',', '.') }} botijas.</p>
+        </div>
+    </div>
+</section>
+@endif
+
 <div class="dashboard-grid">
     <section class="dashboard-panel">
         <div class="dashboard-panel-heading">
@@ -97,7 +115,7 @@
 
 @if($salesMetrics)
 <section class="dashboard-panel dashboard-sales-panel">
-    <div class="dashboard-panel-heading"><div><span class="dashboard-kicker">Vendas</span><h3>Grosso e unidade</h3></div>@if(auth()->user()->hasPermission('sales.create'))<a class="small-link" href="{{ route('sales.index') }}">Registar venda →</a>@endif</div>
+    <div class="dashboard-panel-heading"><div><span class="dashboard-kicker">Vendas</span><h3>Grosso e unidade</h3></div>@if(auth()->user()->canRegisterSales())<a class="small-link" href="{{ route('sales.index') }}">Registar venda →</a>@endif</div>
     <div class="tablewrap"><table class="dashboard-table">
         <thead><tr>
             <th>Tipo</th><th class="num">Botijas vendidas</th><th class="num">Total de vendas</th>

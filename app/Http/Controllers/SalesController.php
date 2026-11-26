@@ -28,8 +28,8 @@ class SalesController extends Controller
     public function index(InventoryBalances $balances, SalesMetrics $salesMetrics)
     {
         $assignedPoint = auth()->user()->is_super_admin ? null : auth()->user()->salesLocation;
-        $canWholesale = ! $assignedPoint || $assignedPoint->kind === 'vehicle';
-        $canUnit = ! $assignedPoint || $assignedPoint->kind !== 'vehicle';
+        $canWholesale = auth()->user()->hasPermission('sales.wholesale.create') && (! $assignedPoint || $assignedPoint->kind === 'vehicle');
+        $canUnit = auth()->user()->hasPermission('sales.unit.create') && (! $assignedPoint || $assignedPoint->kind !== 'vehicle');
         $products = Product::orderBy('brand')->orderBy('weight_kg')->get();
         $sellableProducts = $products->filter(fn (Product $product) => $product->isReadyForSale())->values();
         $customers = Customer::where('is_active', true)->orderBy('name')->get(['id', 'name', 'nuit']);
@@ -553,6 +553,11 @@ class SalesController extends Controller
     {
         $query = SaleOrder::query();
         if ($user->is_super_admin) return $query;
+
+        $channels = [];
+        if ($user->hasPermission('sales.wholesale.create')) $channels[] = 'wholesale';
+        if ($user->hasPermission('sales.unit.create')) $channels[] = 'unit';
+        $query->whereIn('channel', $channels);
 
         $groupIds = $user->groups()->pluck('access_groups.id');
         $query->where(function (Builder $query) use ($user, $groupIds) {

@@ -9,7 +9,8 @@ return [
         'allocations.approve' => 'Aprovar pedidos de botijas',
         'allocations.dispatch' => 'Registar saída e gerar guia de estoque',
         'allocations.receive' => 'Confirmar entrega na banca com comprovativo',
-        'sales.create' => 'Registar vendas a grosso e por unidade',
+        'sales.wholesale.create' => 'Registar vendas a grosso',
+        'sales.unit.create' => 'Registar vendas por unidade',
         'sales.profit.view' => 'Ver margem de lucro das vendas',
         'sales.history.view' => 'Consultar histórico geral de vendas',
         'sales.points.assign' => 'Atribuir postos de venda a utilizadores',
@@ -25,7 +26,7 @@ return [
     'modules' => [
         'botijas' => [
             'name' => 'Vendas de botijas', 'grant' => 'access.grant.botijas',
-            'permissions' => ['products.manage', 'locations.manage', 'allocations.manage', 'allocations.request', 'allocations.approve', 'allocations.dispatch', 'allocations.receive', 'sales.create', 'sales.profit.view', 'sales.history.view', 'sales.points.assign', 'expenses.create', 'expenses.approve', 'expenses.view'],
+            'permissions' => ['products.manage', 'locations.manage', 'allocations.manage', 'allocations.request', 'allocations.approve', 'allocations.dispatch', 'allocations.receive', 'sales.wholesale.create', 'sales.unit.create', 'sales.profit.view', 'sales.history.view', 'sales.points.assign', 'expenses.create', 'expenses.approve', 'expenses.view'],
         ],
         'clientes' => [
             'name' => 'Gestão de Clientes', 'grant' => 'access.grant.clientes',

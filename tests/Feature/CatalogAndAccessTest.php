@@ -25,6 +25,26 @@ class CatalogAndAccessTest extends TestCase
         return $user;
     }
 
+    public function test_old_sales_permission_is_split_for_existing_users_and_groups(): void
+    {
+        $legacy = Permission::create(['key' => 'sales.create', 'label' => 'Registar vendas a grosso e por unidade']);
+        $group = AccessGroup::create(['name' => 'Vendedores']);
+        $group->permissions()->attach($legacy);
+        $groupSeller = User::create(['name' => 'Grupo', 'username' => 'grupo', 'password' => 'password12345', 'is_active' => true]);
+        $groupSeller->groups()->attach($group);
+        $directSeller = User::create(['name' => 'Direto', 'username' => 'direto', 'password' => 'password12345', 'is_active' => true]);
+        $directSeller->directPermissions()->attach($legacy);
+
+        $migration = require database_path('migrations/2026_11_26_000001_split_sales_create_permission.php');
+        $migration->up();
+
+        $this->assertDatabaseMissing('permissions', ['key' => 'sales.create']);
+        foreach ([$groupSeller, $directSeller] as $seller) {
+            $this->assertTrue($seller->hasPermission('sales.wholesale.create'));
+            $this->assertTrue($seller->hasPermission('sales.unit.create'));
+        }
+    }
+
     public function test_catalog_access_sales_and_allocation_pages_are_available(): void
     {
         $this->actingAs($this->owner());
@@ -226,7 +246,7 @@ class CatalogAndAccessTest extends TestCase
         $this->artisan('db:seed')->assertSuccessful();
         $owner = $this->owner();
         $seller = User::create(['name' => 'Vendedora', 'username' => 'vendedora', 'password' => 'password12345', 'is_active' => true]);
-        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.unit.create')->firstOrFail());
         $stand = Location::create(['name' => 'Banca Norte', 'kind' => 'physical', 'is_sales_point' => true]);
         $vehicle = Location::create(['name' => 'Carro antigo', 'kind' => 'vehicle', 'is_sales_point' => true]);
 
@@ -254,7 +274,7 @@ class CatalogAndAccessTest extends TestCase
         $owner = $this->owner();
         $access = Permission::where('key', 'access.manage')->firstOrFail();
         $botijasGrant = Permission::where('key', 'access.grant.botijas')->firstOrFail();
-        $sales = Permission::where('key', 'sales.create')->firstOrFail();
+        $sales = Permission::where('key', 'sales.unit.create')->firstOrFail();
         $customers = Permission::where('key', 'customers.manage')->firstOrFail();
         $manager = User::create(['name' => 'Gestor de acessos', 'username' => 'gestor-acessos', 'password' => 'password12345', 'is_active' => true]);
         $manager->directPermissions()->attach([$access->id, $botijasGrant->id]);
@@ -263,7 +283,7 @@ class CatalogAndAccessTest extends TestCase
         $protected->directPermissions()->attach($customers);
 
         $this->actingAs($manager);
-        $this->get('/access/users')->assertOk()->assertSee('Registar vendas a grosso e por unidade')
+        $this->get('/access/users')->assertOk()->assertSee('Registar vendas por unidade')
             ->assertViewHas('permissions', fn ($permissions) => $permissions->contains('id', $sales->id) && ! $permissions->contains('id', $customers->id));
         $this->post('/access/users', [
             'name' => 'Novo', 'username' => 'novo', 'password' => 'password12345',
@@ -276,13 +296,13 @@ class CatalogAndAccessTest extends TestCase
             'name' => $target->name, 'username' => $target->username, 'is_active' => 1,
             'permissions' => [$sales->id],
         ])->assertSessionHas('success');
-        $this->assertTrue($target->fresh()->hasPermission('sales.create'));
+        $this->assertTrue($target->fresh()->hasPermission('sales.unit.create'));
         $this->get(route('access.users.edit', $protected))->assertForbidden();
         $this->patch(route('access.users.update', $protected), [
             'name' => $protected->name, 'username' => $protected->username,
             'password' => 'hijack12345', 'password_confirmation' => 'hijack12345',
         ])->assertForbidden();
-        $this->assertFalse($protected->fresh()->hasPermission('sales.create'));
+        $this->assertFalse($protected->fresh()->hasPermission('sales.unit.create'));
 
         $this->actingAs($owner);
         $this->get('/access/users')->assertOk()->assertSee('Atribuir acessos do módulo Vendas de botijas');
@@ -328,7 +348,7 @@ class CatalogAndAccessTest extends TestCase
             ->assertDontSee('href="'.route('access.users').'"', false);
 
         $seller = User::create(['name' => 'Vendedor', 'username' => 'vendedor', 'password' => 'password12345', 'is_active' => true]);
-        $seller->directPermissions()->attach(Permission::where('key', 'sales.create')->firstOrFail());
+        $seller->directPermissions()->attach(Permission::where('key', 'sales.unit.create')->firstOrFail());
         $this->actingAs($seller);
         $this->get('/modules')->assertOk()->assertSee('href="'.route('sales.index').'"', false)
             ->assertSee('Gestão de acessos')
@@ -371,7 +391,7 @@ class CatalogAndAccessTest extends TestCase
     {
         $this->artisan('db:seed')->assertSuccessful();
         $owner = $this->owner();
-        $salesPermission = Permission::where('key', 'sales.create')->firstOrFail();
+        $salesPermission = Permission::where('key', 'sales.unit.create')->firstOrFail();
         $dashboardPermission = Permission::where('key', 'products.manage')->firstOrFail();
         $profitPermission = Permission::where('key', 'sales.profit.view')->firstOrFail();
         $group = AccessGroup::create(['name' => 'Vendedores']);

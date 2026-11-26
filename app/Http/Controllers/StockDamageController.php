@@ -18,7 +18,7 @@ class StockDamageController extends Controller
     {
         $user = $request->user();
         $canManage = $user->hasPermission('products.manage');
-        abort_unless($canManage || $user->hasPermission('sales.create'), 403);
+        abort_unless($canManage || $user->hasPermission('sales.unit.create'), 403);
 
         $products = Product::orderBy('brand')->orderBy('weight_kg')->get();
         $stands = Location::where('kind', 'physical')->where('is_sales_point', true)->orderBy('name')->get();
@@ -63,7 +63,7 @@ class StockDamageController extends Controller
     {
         $user = $request->user();
         $canManage = $user->hasPermission('products.manage');
-        abort_unless($canManage || $user->hasPermission('sales.create'), 403);
+        abort_unless($canManage || $user->hasPermission('sales.unit.create'), 403);
         if (is_string($request->input('reason'))) $request->merge(['reason' => trim($request->input('reason'))]);
         $data = $request->validate([
             'product_id' => ['required', 'integer', Rule::exists('products', 'id')->whereNull('deleted_at')],

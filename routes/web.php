@@ -66,13 +66,13 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::post('/expenses/{expense}/reject', [OperationalExpenseController::class, 'reject'])->middleware('permission:expenses.approve')->name('expenses.reject');
     Route::post('/expenses/{expense}/cancel', [OperationalExpenseController::class, 'cancel'])->middleware('permission:expenses.approve')->name('expenses.cancel');
     Route::get('/expenses/{expense}/receipt', [OperationalExpenseController::class, 'receipt'])->name('expenses.receipt');
-    Route::middleware('permission:sales.create')->group(function () {
+    Route::middleware('permission:sales.wholesale.create,sales.unit.create')->group(function () {
         Route::get('/sales', [SalesController::class, 'index'])->name('sales.index');
-        Route::post('/sales/wholesale', [SalesController::class, 'wholesale'])->name('sales.wholesale');
-        Route::post('/sales/unit', [SalesController::class, 'unit'])->name('sales.unit');
+        Route::post('/sales/wholesale', [SalesController::class, 'wholesale'])->middleware('permission:sales.wholesale.create')->name('sales.wholesale');
+        Route::post('/sales/unit', [SalesController::class, 'unit'])->middleware('permission:sales.unit.create')->name('sales.unit');
         Route::post('/sales/{sale}/return', [SalesController::class, 'returnDamaged'])->name('sales.return');
         Route::post('/sales/{sale}/cancel', [SalesController::class, 'cancel'])->name('sales.cancel');
-        Route::get('/sales/{sale}/delivery-guide', [SalesController::class, 'deliveryGuide'])->name('sales.delivery-guide');
+        Route::get('/sales/{sale}/delivery-guide', [SalesController::class, 'deliveryGuide'])->middleware('permission:sales.wholesale.create')->name('sales.delivery-guide');
     });
     Route::get('/sales/history', [SalesController::class, 'history'])->middleware('permission:sales.history.view')->name('sales.history');
     Route::get('/sales/history/pdf', [SalesController::class, 'historyPdf'])->middleware('permission:sales.history.view')->name('sales.history.pdf');
